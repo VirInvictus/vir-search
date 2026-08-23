@@ -262,6 +262,15 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
     fn relational(&mut self, field: F) -> PResult<F, S> {
         let comp = self.eat_comparator();
         let raw = self.value_string().ok_or(())?;
+        // Handle :true/:false presence checks even on numeric/date fields
+        if comp.is_none() {
+            if let Some(b) = bool_word(&raw) {
+                return Ok(Expr::Field {
+                    field,
+                    kind: if b { MatchKind::HasAny } else { MatchKind::HasNone },
+                });
+            }
+        }
         let Some(low) = parse_typed_value(field.clone(), &raw) else {
             self.warnings.push(format!("bad numeric/date value {raw:?}; matching as text"));
             let prefix = comp.map(|c| c.as_str()).unwrap_or("");
