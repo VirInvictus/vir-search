@@ -50,7 +50,7 @@ impl Comparator {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DateSpec {
-    Today, Yesterday, ThisWeek, ThisMonth, ThisYear,
+    Today, Yesterday, Tomorrow, ThisWeek, LastWeek, NextWeek, ThisMonth, ThisYear,
     DaysAgo(u32),
     Ymd(i32, Option<u32>, Option<u32>),
 }
@@ -60,7 +60,10 @@ impl fmt::Display for DateSpec {
         match self {
             Self::Today => write!(f, "today"),
             Self::Yesterday => write!(f, "yesterday"),
+            Self::Tomorrow => write!(f, "tomorrow"),
             Self::ThisWeek => write!(f, "thisweek"),
+            Self::LastWeek => write!(f, "lastweek"),
+            Self::NextWeek => write!(f, "nextweek"),
             Self::ThisMonth => write!(f, "thismonth"),
             Self::ThisYear => write!(f, "thisyear"),
             Self::DaysAgo(n) => write!(f, "{n}daysago"),

@@ -12,6 +12,15 @@ pub fn resolve_range(spec: &DateSpec, today: NaiveDate) -> (i64, i64) {
     let (start, end) = match spec {
         DateSpec::Today => (today, next_day(today)),
         DateSpec::Yesterday => (prev_day(today), today),
+        DateSpec::Tomorrow => (next_day(today), next_day(next_day(today))),
+        DateSpec::LastWeek => {
+            let monday = today - Days::new(today.weekday().num_days_from_monday() as u64) - Days::new(7);
+            (monday, monday + Days::new(7))
+        }
+        DateSpec::NextWeek => {
+            let monday = today - Days::new(today.weekday().num_days_from_monday() as u64) + Days::new(7);
+            (monday, monday + Days::new(7))
+        }
         DateSpec::ThisWeek => {
             let monday = today - Days::new(today.weekday().num_days_from_monday() as u64);
             (monday, monday + Days::new(7))
