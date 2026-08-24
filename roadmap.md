@@ -17,3 +17,17 @@
 - [ ] **Human Duration Unit Parsing:** Support `1h30m`, `320k`, `50MB` normalizations. (Impacts: Conservatory track lengths, Atrium `estimated` times).
 - [ ] **Generic AST Inspector Traits:** Introduce `Visitor` and `Folder` to quickly extract active states, fields, and check if an AST is SQL-eligible.
 - [ ] **Viaduct Integration Blueprint:** Map RSS concepts (`feed:`, `is:unread`) into `vir-search` traits and adopt it inside Viaduct's timeline filter.
+
+## Phase 3: Robustness & Logic Bug Fixes (2026-08-23)
+*Context: Found critical AST parsing flaws, edge cases causing catastrophic parse failure, and documentation desyncs during a rigorous codebase sweep.*
+
+### Bugs to Fix
+- [ ] **DateSpec Keywords Omission:** Parse `tomorrow`, `lastweek`, and `nextweek` correctly instead of silently degrading them to text nodes.
+- [ ] **Non-Recursive Negation:** Fix `boolean_factor` so double negation (`NOT NOT a`) parses correctly instead of producing corrupted ASTs.
+- [ ] **Catastrophic Degradation:** Stop returning `Err(())` on trailing tokens (e.g. `foo AND`). Handle partial syntax gracefully so the query doesn't completely collapse to `Expr::Empty`.
+- [ ] **Standalone Punctuation Erasure:** Stop erasing standalone symbols (`?`, `!`, `>`, etc.) in the fallback predicate, which currently returns empty strings.
+- [ ] **Substring Interception:** Prevent `"true"` and `"false"` string matches (`genre:"true"`) from being falsely converted into `MatchKind::HasAny`.
+- [ ] **Relational Operators on String Fields:** Support string comparisons (`author:>=Sanderson`) instead of dropping the entire query.
+- [ ] **Lexer Quote Escapes:** Properly recognize escaped backslashes (`\\`) so closing quotes aren't ignored.
+- [ ] **Negated FTS Terms:** Prevent `collect_text_terms` from extracting negated terms (`NOT ambient`) for positive SQLite FTS lookups.
+- [ ] **Docs Sync:** Correct `Cargo.toml` edition vs `spec.md`, update dependencies list, and clean up stale upstream comments in `dates.rs` and `fold.rs`.
