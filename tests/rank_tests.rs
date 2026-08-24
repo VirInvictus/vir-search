@@ -1,40 +1,71 @@
-use vir_search::rank::{blend_relevance, collect_text_terms};
-use vir_search::parse::parse;
 use vir_search::ast::{FieldType, ParseField, ParseSort, ParseState};
+use vir_search::parse::parse;
+use vir_search::rank::{blend_relevance, collect_text_terms};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TestField { Genre, Rating }
+pub enum TestField {
+    Genre,
+    Rating,
+}
 impl std::fmt::Display for TestField {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self { Self::Genre => "genre", Self::Rating => "rating" };
+        let s = match self {
+            Self::Genre => "genre",
+            Self::Rating => "rating",
+        };
         write!(f, "{s}")
     }
 }
 impl ParseField for TestField {
     fn parse(name: &str) -> Option<Self> {
-        match name { "genre" => Some(Self::Genre), "rating" => Some(Self::Rating), _ => None }
+        match name {
+            "genre" => Some(Self::Genre),
+            "rating" => Some(Self::Rating),
+            _ => None,
+        }
     }
     fn field_type(&self) -> FieldType {
-        match self { Self::Rating => FieldType::Int, _ => FieldType::String }
+        match self {
+            Self::Rating => FieldType::Int,
+            _ => FieldType::String,
+        }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TestState { Starred }
+pub enum TestState {
+    Starred,
+}
 impl std::fmt::Display for TestState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "starred") }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "starred")
+    }
 }
 impl ParseState for TestState {
-    fn parse(name: &str) -> Option<Self> { match name { "starred" => Some(Self::Starred), _ => None } }
+    fn parse(name: &str) -> Option<Self> {
+        match name {
+            "starred" => Some(Self::Starred),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TestSort { Added }
+pub enum TestSort {
+    Added,
+}
 impl std::fmt::Display for TestSort {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "added") }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "added")
+    }
 }
 impl ParseSort for TestSort {
-    fn parse(name: &str) -> Option<Self> { match name { "added" => Some(Self::Added), _ => None } }
+    fn parse(name: &str) -> Option<Self> {
+        match name {
+            "added" => Some(Self::Added),
+            _ => None,
+        }
+    }
 }
 
 #[test]

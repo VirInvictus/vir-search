@@ -1,5 +1,7 @@
-use crate::ast::{Comparator, DateSpec, Expr, ParseField, ParseState, ParseSort, MatchKind, SortSpec, Value};
-use crate::lex::{lex, Token};
+use crate::ast::{
+    Comparator, DateSpec, Expr, MatchKind, ParseField, ParseSort, ParseState, SortSpec, Value,
+};
+use crate::lex::{Token, lex};
 
 pub struct ParseResult<F, S, K> {
     pub expr: Expr<F, S>,
@@ -14,21 +16,31 @@ pub trait PerspectiveResolver<F, S> {
 }
 
 impl<F, S> PerspectiveResolver<F, S> for () {
-    fn expression(&self, _name: &str) -> Option<String> { None }
+    fn expression(&self, _name: &str) -> Option<String> {
+        None
+    }
 }
 
 pub fn parse<F: ParseField, S: ParseState, K: ParseSort>(input: &str) -> ParseResult<F, S, K> {
     parse_inner::<F, S, K, ()>(input, None, &[])
 }
 
-pub fn parse_with_resolver<F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S>>(
-    input: &str, resolver: &R
+pub fn parse_with_resolver<
+    F: ParseField,
+    S: ParseState,
+    K: ParseSort,
+    R: PerspectiveResolver<F, S>,
+>(
+    input: &str,
+    resolver: &R,
 ) -> ParseResult<F, S, K> {
     parse_inner(input, Some(resolver), &[])
 }
 
 fn parse_inner<F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S>>(
-    input: &str, resolver: Option<&R>, seen: &[String]
+    input: &str,
+    resolver: Option<&R>,
+    seen: &[String],
 ) -> ParseResult<F, S, K> {
     let mut p = Parser {
         tokens: lex(input),
@@ -57,7 +69,9 @@ struct Parser<'a, F, S, K, R> {
     _marker: std::marker::PhantomData<(F, S)>,
 }
 
-impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S>> Parser<'a, F, S, K, R> {
+impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S>>
+    Parser<'a, F, S, K, R>
+{
     fn peek(&mut self) -> Option<&Token> {
         self.tokens.get(self.pos)
     }
@@ -162,7 +176,8 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
                             match S::parse(&val.to_ascii_lowercase()) {
                                 Some(s) => Ok(Expr::State(s)),
                                 None => {
-                                    self.warnings.push(format!("unknown state {val:?}; matching as text"));
+                                    self.warnings
+                                        .push(format!("unknown state {val:?}; matching as text"));
                                     Ok(Expr::Text(format!("is:{val}")))
                                 }
                             }
@@ -185,29 +200,50 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
                         _ => match F::parse(&lname) {
                             Some(field) => {
                                 let ft = field.field_type();
-                                if ft == crate::ast::FieldType::Int || ft == crate::ast::FieldType::Real || ft == crate::ast::FieldType::Date {
+                                if ft == crate::ast::FieldType::Int
+                                    || ft == crate::ast::FieldType::Real
+                                    || ft == crate::ast::FieldType::Date
+                                {
                                     self.relational(field)
                                 } else {
                                     self.text_match(field)
                                 }
-                            },
+                            }
                             None => {
                                 let remainder = self.value_string().unwrap_or_default();
-                                self.warnings.push(format!("unknown field {w_clone:?}; matching as text"));
+                                self.warnings
+                                    .push(format!("unknown field {w_clone:?}; matching as text"));
                                 Ok(text_or_empty(format!("{w_clone}:{remainder}")))
                             }
-                        }
+                        },
                     }
                 } else {
                     Ok(text_or_empty(w_clone))
                 }
             }
             Token::Quoted(q) => Ok(text_or_empty(q.clone())),
-            Token::Colon | Token::RParen | Token::Eq | Token::Ne | Token::Lt | Token::Le | Token::Gt | Token::Ge | Token::Tilde | Token::Quest | Token::DotDot | Token::Bang => {
+            Token::Colon
+            | Token::RParen
+            | Token::Eq
+            | Token::Ne
+            | Token::Lt
+            | Token::Le
+            | Token::Gt
+            | Token::Ge
+            | Token::Tilde
+            | Token::Quest
+            | Token::DotDot
+            | Token::Bang => {
                 let mut fallback = String::new();
-                if let Token::Colon = &t { fallback.push(':'); }
-                if let Token::Eq = &t { fallback.push('='); }
-                if let Token::Tilde = &t { fallback.push('~'); }
+                if let Token::Colon = &t {
+                    fallback.push(':');
+                }
+                if let Token::Eq = &t {
+                    fallback.push('=');
+                }
+                if let Token::Tilde = &t {
+                    fallback.push('~');
+                }
                 Ok(text_or_empty(fallback))
             }
         }
@@ -233,27 +269,43 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
             Some(Token::Eq) => {
                 self.pos += 1;
                 let val = self.value_string().ok_or(())?;
-                Ok(Expr::Field { field, kind: MatchKind::Exact(val) })
+                Ok(Expr::Field {
+                    field,
+                    kind: MatchKind::Exact(val),
+                })
             }
             Some(Token::Tilde) => {
                 self.pos += 1;
                 let val = self.value_string().ok_or(())?;
-                Ok(Expr::Field { field, kind: MatchKind::Regex(val) })
+                Ok(Expr::Field {
+                    field,
+                    kind: MatchKind::Regex(val),
+                })
             }
             Some(Token::Quest) => {
                 self.pos += 1;
                 let val = self.value_string().ok_or(())?;
-                Ok(Expr::Field { field, kind: MatchKind::Fuzzy(val) })
+                Ok(Expr::Field {
+                    field,
+                    kind: MatchKind::Fuzzy(val),
+                })
             }
             _ => {
                 let val = self.value_string().ok_or(())?;
                 if let Some(b) = bool_word(&val) {
                     Ok(Expr::Field {
                         field,
-                        kind: if b { MatchKind::HasAny } else { MatchKind::HasNone },
+                        kind: if b {
+                            MatchKind::HasAny
+                        } else {
+                            MatchKind::HasNone
+                        },
                     })
                 } else {
-                    Ok(Expr::Field { field, kind: MatchKind::Substring(val) })
+                    Ok(Expr::Field {
+                        field,
+                        kind: MatchKind::Substring(val),
+                    })
                 }
             }
         }
@@ -267,12 +319,17 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
             if let Some(b) = bool_word(&raw) {
                 return Ok(Expr::Field {
                     field,
-                    kind: if b { MatchKind::HasAny } else { MatchKind::HasNone },
+                    kind: if b {
+                        MatchKind::HasAny
+                    } else {
+                        MatchKind::HasNone
+                    },
                 });
             }
         }
         let Some(low) = parse_typed_value(field.clone(), &raw) else {
-            self.warnings.push(format!("bad numeric/date value {raw:?}; matching as text"));
+            self.warnings
+                .push(format!("bad numeric/date value {raw:?}; matching as text"));
             let prefix = comp.map(|c| c.as_str()).unwrap_or("");
             return Ok(Expr::Text(format!("{field}:{prefix}{raw}")));
         };
@@ -282,7 +339,8 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
             if let Some(high) = parse_typed_value(field.clone(), &raw_hi) {
                 return Ok(Expr::Range { field, low, high });
             }
-            self.warnings.push(format!("bad range bound {raw_hi:?}; matching as text"));
+            self.warnings
+                .push(format!("bad range bound {raw_hi:?}; matching as text"));
             return Ok(Expr::Text(format!("{field}:{raw}..{raw_hi}")));
         }
         Ok(Expr::Compare {
@@ -323,11 +381,13 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
             return Ok(Expr::Text(format!("vl:{name}")));
         };
         if self.seen.iter().any(|s| s == &key) {
-            self.warnings.push(format!("perspective cycle at {name:?}; ignored"));
+            self.warnings
+                .push(format!("perspective cycle at {name:?}; ignored"));
             return Ok(Expr::Empty);
         }
         let Some(text) = resolver.expression(name) else {
-            self.warnings.push(format!("unknown perspective {name:?}; ignored"));
+            self.warnings
+                .push(format!("unknown perspective {name:?}; ignored"));
             return Ok(Expr::Empty);
         };
         let mut seen = self.seen.clone();

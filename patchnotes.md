@@ -1,3 +1,7 @@
+## v1.0.1 (2026-08-23)
+
+- **Build:** build: add GitHub Actions CI workflow
+
 # vir-search Patch Notes
 
 ## v1.0.0 (2026-08-23)

@@ -35,22 +35,37 @@ pub enum MatchKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Comparator {
-    Eq, Ne, Lt, Le, Gt, Ge,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
 }
 
 impl Comparator {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Eq => "=", Self::Ne => "!=",
-            Self::Lt => "<", Self::Le => "<=",
-            Self::Gt => ">", Self::Ge => ">=",
+            Self::Eq => "=",
+            Self::Ne => "!=",
+            Self::Lt => "<",
+            Self::Le => "<=",
+            Self::Gt => ">",
+            Self::Ge => ">=",
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DateSpec {
-    Today, Yesterday, Tomorrow, ThisWeek, LastWeek, NextWeek, ThisMonth, ThisYear,
+    Today,
+    Yesterday,
+    Tomorrow,
+    ThisWeek,
+    LastWeek,
+    NextWeek,
+    ThisMonth,
+    ThisYear,
     DaysAgo(u32),
     Ymd(i32, Option<u32>, Option<u32>),
 }
@@ -103,9 +118,20 @@ pub struct SortSpec<K> {
 pub enum Expr<F, S> {
     Empty,
     Text(String),
-    Field { field: F, kind: MatchKind },
-    Compare { field: F, comp: Comparator, value: Value },
-    Range { field: F, low: Value, high: Value },
+    Field {
+        field: F,
+        kind: MatchKind,
+    },
+    Compare {
+        field: F,
+        comp: Comparator,
+        value: Value,
+    },
+    Range {
+        field: F,
+        low: Value,
+        high: Value,
+    },
     State(S),
     Not(Box<Expr<F, S>>),
     And(Vec<Expr<F, S>>),
@@ -128,7 +154,11 @@ impl<F: ParseField, S: ParseState> fmt::Display for Expr<F, S> {
     }
 }
 
-fn write_field<F: ParseField>(f: &mut fmt::Formatter<'_>, field: &F, kind: &MatchKind) -> fmt::Result {
+fn write_field<F: ParseField>(
+    f: &mut fmt::Formatter<'_>,
+    field: &F,
+    kind: &MatchKind,
+) -> fmt::Result {
     let name = field;
     match kind {
         MatchKind::Substring(v) => write!(f, "{name}:{}", quote_if_needed(v)),
@@ -140,15 +170,26 @@ fn write_field<F: ParseField>(f: &mut fmt::Formatter<'_>, field: &F, kind: &Matc
     }
 }
 
-fn write_joined<F: ParseField, S: ParseState>(f: &mut fmt::Formatter<'_>, items: &[Expr<F, S>], op: &str, is_or: bool) -> fmt::Result {
+fn write_joined<F: ParseField, S: ParseState>(
+    f: &mut fmt::Formatter<'_>,
+    items: &[Expr<F, S>],
+    op: &str,
+    is_or: bool,
+) -> fmt::Result {
     for (i, item) in items.iter().enumerate() {
-        if i > 0 { write!(f, " {op} ")?; }
+        if i > 0 {
+            write!(f, " {op} ")?;
+        }
         let needs = match item {
             Expr::Or(_) if !is_or => true,
             Expr::And(_) if is_or => false,
             _ => false,
         };
-        if needs { write!(f, "({item})")?; } else { write!(f, "{item}")?; }
+        if needs {
+            write!(f, "({item})")?;
+        } else {
+            write!(f, "{item}")?;
+        }
     }
     Ok(())
 }
