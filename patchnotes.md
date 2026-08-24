@@ -1,3 +1,6 @@
+## v1.0.2 (2026-08-24)
+
+- **Build:** Removed unused MatchKind import to fix clippy warnings blocking the build.
 ## v1.0.1 (2026-08-23)
 
 - **Build:** build: add GitHub Actions CI workflow
