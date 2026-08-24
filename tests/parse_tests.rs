@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use vir_search::ast::{Expr, FieldType, MatchKind, ParseField, ParseSort, ParseState, SortSpec};
+use vir_search::ast::{Expr, FieldType, ParseField, ParseSort, ParseState, SortSpec};
 use vir_search::parse::{PerspectiveResolver, parse, parse_with_resolver};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
