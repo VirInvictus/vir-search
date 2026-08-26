@@ -1,3 +1,7 @@
+## v1.0.3 (2026-08-25)
+
+- **Housekeeping:** Removed the AI-porting scratch scripts (`rewrite_ast.py`, `rewrite_parse.py`, `rewrite_parse_lex.py`, `rewrite_rank.py`, `vir-search-port.py`) that were accidentally committed to the repository root during extraction.
+
 ## v1.0.2 (2026-08-24)
 
 - **Build:** Removed unused MatchKind import to fix clippy warnings blocking the build.
