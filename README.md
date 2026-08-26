@@ -57,3 +57,13 @@ impl ParseField for MyField {
 let result = parse::<MyField, MyState, MySort>("author:sanderson rating:>=4");
 println!("Parsed expression: {}", result.expr);
 ```
+
+## Support
+
+If vir-search's useful to you and you'd like to chip in:
+
+- liberapay · [liberapay.com/bdkl](https://liberapay.com/bdkl/)
+- bitcoin
+  ```
+  bc1qkge6zr45tzqfwfmvma2ylumt6mg7wlwmhr05yv
+  ```
