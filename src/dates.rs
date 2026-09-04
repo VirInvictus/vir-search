@@ -31,9 +31,22 @@ pub fn resolve_range(spec: &DateSpec, today: NaiveDate) -> (i64, i64) {
             let first = ymd(today.year(), today.month(), 1);
             (first, add_month(first))
         }
+        DateSpec::LastMonth => {
+            let first = ymd(today.year(), today.month(), 1);
+            (sub_month(first), first)
+        }
+        DateSpec::NextMonth => {
+            let first = ymd(today.year(), today.month(), 1);
+            let next = add_month(first);
+            (next, add_month(next))
+        }
         DateSpec::ThisYear => (ymd(today.year(), 1, 1), ymd(today.year() + 1, 1, 1)),
         DateSpec::DaysAgo(n) => {
             let d = today - Days::new(*n as u64);
+            (d, next_day(d))
+        }
+        DateSpec::InDays(n) => {
+            let d = today + Days::new(*n as u64);
             (d, next_day(d))
         }
         DateSpec::Ymd(y, None, _) => (ymd(*y, 1, 1), ymd(*y + 1, 1, 1)),
@@ -91,6 +104,16 @@ fn add_month(first: NaiveDate) -> NaiveDate {
     ymd(y, m, 1)
 }
 
+/// First of the month before `first` (which is itself a first-of-month).
+fn sub_month(first: NaiveDate) -> NaiveDate {
+    let (y, m) = if first.month() == 1 {
+        (first.year() - 1, 12)
+    } else {
+        (first.year(), first.month() - 1)
+    };
+    ymd(y, m, 1)
+}
+
 fn start_epoch(date: NaiveDate) -> i64 {
     date.and_time(NaiveTime::MIN).and_utc().timestamp()
 }
@@ -134,5 +157,26 @@ mod tests {
         let (s, e) = resolve_range(&DateSpec::DaysAgo(3), today);
         assert_eq!(s, start_epoch(d(2026, 6, 17)));
         assert_eq!(e, start_epoch(d(2026, 6, 18)));
+    }
+
+    #[test]
+    fn month_neighbors_and_in_days() {
+        let today = d(2026, 6, 20);
+        let (s, e) = resolve_range(&DateSpec::LastMonth, today);
+        assert_eq!(s, start_epoch(d(2026, 5, 1)));
+        assert_eq!(e, start_epoch(d(2026, 6, 1)));
+        let (s, e) = resolve_range(&DateSpec::NextMonth, today);
+        assert_eq!(s, start_epoch(d(2026, 7, 1)));
+        assert_eq!(e, start_epoch(d(2026, 8, 1)));
+        // Year boundaries in both directions.
+        let (s, e) = resolve_range(&DateSpec::LastMonth, d(2026, 1, 15));
+        assert_eq!(s, start_epoch(d(2025, 12, 1)));
+        assert_eq!(e, start_epoch(d(2026, 1, 1)));
+        let (s, e) = resolve_range(&DateSpec::NextMonth, d(2026, 12, 15));
+        assert_eq!(s, start_epoch(d(2027, 1, 1)));
+        assert_eq!(e, start_epoch(d(2027, 2, 1)));
+        let (s, e) = resolve_range(&DateSpec::InDays(3), today);
+        assert_eq!(s, start_epoch(d(2026, 6, 23)));
+        assert_eq!(e, start_epoch(d(2026, 6, 24)));
     }
 }

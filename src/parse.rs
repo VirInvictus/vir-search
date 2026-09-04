@@ -376,6 +376,38 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
                     }
                 }
             }
+            // `genre:(rock,jazz)`: a parenthesized comma list becomes an
+            // In matcher. No spaces inside the list (a space ends the
+            // bareword); a quoted value is literal, never a list.
+            Some(Token::LParen) => {
+                self.pos += 1;
+                match self.value_string() {
+                    Some(word) if self.peek() == Some(&Token::RParen) => {
+                        self.pos += 1;
+                        let items: Vec<String> = word
+                            .split(',')
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        if items.is_empty() {
+                            self.warn_spanned(format!("empty list for {field}:( )"), field_span);
+                            return text_or_empty(format!("{field}:()"));
+                        }
+                        Expr::Field {
+                            field,
+                            kind: MatchKind::In(items),
+                        }
+                    }
+                    got => {
+                        let got = got.unwrap_or_default();
+                        self.warn_spanned(
+                            format!("malformed list for {field}:(...); matching as text"),
+                            field_span,
+                        );
+                        text_or_empty(format!("{field}:({got}"))
+                    }
+                }
+            }
             _ => {
                 let quoted = matches!(self.peek(), Some(Token::Quoted(_)));
                 let Some(val) = self.value_string() else {
@@ -393,6 +425,27 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
                             } else {
                                 MatchKind::HasNone
                             },
+                        };
+                    }
+                    // Wildcards: one unquoted trailing or leading star selects
+                    // prefix/suffix matching on the bareword (barewords never
+                    // contain spaces, so Display round-trips).
+                    if let Some(base) = val
+                        .strip_suffix('*')
+                        .filter(|b| !b.is_empty() && !b.contains('*'))
+                    {
+                        return Expr::Field {
+                            field,
+                            kind: MatchKind::Prefix(base.to_string()),
+                        };
+                    }
+                    if let Some(base) = val
+                        .strip_prefix('*')
+                        .filter(|b| !b.is_empty() && !b.contains('*'))
+                    {
+                        return Expr::Field {
+                            field,
+                            kind: MatchKind::Suffix(base.to_string()),
                         };
                     }
                 }
@@ -527,10 +580,13 @@ fn parse_typed_value<F: ParseField>(field: F, raw: &str) -> Option<Value> {
         return parse_date_spec(raw).map(Value::Date);
     }
     if field.field_type() == crate::ast::FieldType::Real {
-        raw.parse::<f64>().ok().map(Value::Real)
-    } else {
-        raw.parse::<i64>().ok().map(Value::Int)
+        return raw
+            .parse::<f64>()
+            .ok()
+            .or_else(|| parse_duration(raw))
+            .map(Value::Real);
     }
+    raw.parse::<i64>().ok().map(Value::Int)
 }
 
 fn parse_date_spec(raw: &str) -> Option<DateSpec> {
@@ -549,6 +605,16 @@ fn parse_date_spec(raw: &str) -> Option<DateSpec> {
     if let Some(n) = s.strip_suffix("daysago") {
         return n.parse::<u32>().ok().map(DateSpec::DaysAgo);
     }
+    if let Some(n) = s.strip_prefix("in").and_then(|r| r.strip_suffix("days")) {
+        return n.parse::<u32>().ok().map(DateSpec::InDays);
+    }
+    // Compact offsets: `+7d` forward, `-7d` back.
+    if let Some(n) = s.strip_suffix('d').and_then(|r| r.strip_prefix('+')) {
+        return n.parse::<u32>().ok().map(DateSpec::InDays);
+    }
+    if let Some(n) = s.strip_suffix('d').and_then(|r| r.strip_prefix('-')) {
+        return n.parse::<u32>().ok().map(DateSpec::DaysAgo);
+    }
     let mut parts = s.split('-');
     let year: i32 = parts.next()?.parse().ok()?;
     let month = match parts.next() {
@@ -563,4 +629,75 @@ fn parse_date_spec(raw: &str) -> Option<DateSpec> {
         return None;
     }
     Some(DateSpec::Ymd(year, month, day))
+}
+
+/// Human duration parsing for Real fields: a chain of (number, time-unit)
+/// pairs is summed in seconds (`1h30m` -> 5400, `90m` -> 5400, `2d12h`), and
+/// a plain number with a magnitude suffix scales (`320k` -> 320000, `50mb` ->
+/// 5e7). A bare `m` means minutes; megabytes are written `mb`.
+fn parse_duration(raw: &str) -> Option<f64> {
+    let s: String = raw
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    if s.is_empty() {
+        return None;
+    }
+    if let Some(total) = duration_chain(&s) {
+        return Some(total);
+    }
+    // Magnitude suffixes: only reached when no duration chain consumed the
+    // string (`50mb`'s `b` is not a digit, so the chain rejects it).
+    const MAGNITUDES: &[(&str, f64)] = &[("kb", 1e3), ("k", 1e3), ("mb", 1e6), ("gb", 1e9)];
+    for (suffix, factor) in MAGNITUDES {
+        if let Some(num) = s.strip_suffix(suffix) {
+            return num.parse::<f64>().ok().map(|n| n * factor);
+        }
+    }
+    None
+}
+
+/// Sum of one or more (number, time-unit) pairs consuming the whole string.
+fn duration_chain(s: &str) -> Option<f64> {
+    let bytes = s.as_bytes();
+    // Longest-first so `minutes` wins over `min` over `m`.
+    const UNITS: &[(&str, f64)] = &[
+        ("seconds", 1.0),
+        ("second", 1.0),
+        ("secs", 1.0),
+        ("sec", 1.0),
+        ("minutes", 60.0),
+        ("minute", 60.0),
+        ("mins", 60.0),
+        ("min", 60.0),
+        ("hours", 3600.0),
+        ("hour", 3600.0),
+        ("hrs", 3600.0),
+        ("hr", 3600.0),
+        ("days", 86400.0),
+        ("day", 86400.0),
+        ("s", 1.0),
+        ("m", 60.0),
+        ("h", 3600.0),
+        ("d", 86400.0),
+    ];
+    let len = bytes.len();
+    let mut total = 0.0;
+    let mut i = 0;
+    while i < len {
+        let num_start = i;
+        while i < len && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
+            i += 1;
+        }
+        if i == num_start {
+            return None;
+        }
+        let n: f64 = s[num_start..i].parse().ok()?;
+        let (unit, factor) = UNITS.iter().find(|(u, _)| s[i..].starts_with(u))?;
+        total += n * factor;
+        i += unit.len();
+    }
+    Some(total)
 }

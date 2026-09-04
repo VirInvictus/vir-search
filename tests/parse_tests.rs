@@ -407,3 +407,122 @@ fn vl_without_resolver_degrades_to_text() {
         Expr::Text("vl:fav".into())
     );
 }
+
+#[test]
+fn grammar_expansion_round_trips() {
+    for input in [
+        "added:in3days",
+        "added:lastmonth",
+        "added:nextmonth",
+        "added:+7d",
+        "added:-14d",
+        "genre:ambient*",
+        "genre:*metal",
+        "genre:(rock,jazz)",
+        "duration:>=1h30m",
+        "duration:>90m",
+    ] {
+        round_trip(input);
+    }
+}
+
+#[test]
+fn relative_date_semantics() {
+    let p = parse::<TestField, TestState, TestSort>("added:in3days");
+    assert_eq!(
+        p.expr,
+        Expr::Compare {
+            field: TestField::Added,
+            comp: Comparator::Eq,
+            value: Value::Date(DateSpec::InDays(3)),
+        }
+    );
+    let p = parse::<TestField, TestState, TestSort>("added:+7d");
+    assert_eq!(
+        p.expr,
+        Expr::Compare {
+            field: TestField::Added,
+            comp: Comparator::Eq,
+            value: Value::Date(DateSpec::InDays(7)),
+        }
+    );
+    let p = parse::<TestField, TestState, TestSort>("added:-14d");
+    assert_eq!(
+        p.expr,
+        Expr::Compare {
+            field: TestField::Added,
+            comp: Comparator::Eq,
+            value: Value::Date(DateSpec::DaysAgo(14)),
+        }
+    );
+}
+
+#[test]
+fn wildcard_matchers() {
+    let p = parse::<TestField, TestState, TestSort>("genre:ambient*");
+    assert_eq!(
+        p.expr,
+        Expr::Field {
+            field: TestField::Genre,
+            kind: MatchKind::Prefix("ambient".into()),
+        }
+    );
+    let p = parse::<TestField, TestState, TestSort>("genre:*metal");
+    assert_eq!(
+        p.expr,
+        Expr::Field {
+            field: TestField::Genre,
+            kind: MatchKind::Suffix("metal".into()),
+        }
+    );
+    // A quoted star is still literal.
+    let p = parse::<TestField, TestState, TestSort>("genre:\"*\"");
+    assert_eq!(
+        p.expr,
+        Expr::Field {
+            field: TestField::Genre,
+            kind: MatchKind::Substring("*".into()),
+        }
+    );
+}
+
+#[test]
+fn in_matcher_takes_a_comma_list() {
+    let p = parse::<TestField, TestState, TestSort>("genre:(rock,jazz)");
+    assert_eq!(
+        p.expr,
+        Expr::Field {
+            field: TestField::Genre,
+            kind: MatchKind::In(vec!["rock".into(), "jazz".into()]),
+        }
+    );
+    // A malformed list degrades to visible text without collapsing.
+    let p = parse::<TestField, TestState, TestSort>("genre:(rock");
+    assert_eq!(
+        p.expr,
+        parse::<TestField, TestState, TestSort>("genre:(rock").expr
+    );
+    assert!(!p.warnings.is_empty());
+}
+
+#[test]
+fn duration_values_parse_for_real_fields() {
+    let p = parse::<TestField, TestState, TestSort>("duration:>=1h30m");
+    assert_eq!(
+        p.expr,
+        Expr::Compare {
+            field: TestField::Duration,
+            comp: Comparator::Ge,
+            value: Value::Real(5400.0),
+        }
+    );
+    let p = parse::<TestField, TestState, TestSort>("duration:>90m");
+    assert_eq!(
+        p.expr,
+        Expr::Compare {
+            field: TestField::Duration,
+            comp: Comparator::Gt,
+            value: Value::Real(5400.0),
+        }
+    );
+}

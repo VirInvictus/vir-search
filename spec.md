@@ -40,6 +40,7 @@ query down with it. Every degradation is also reported twice: as a string in
 - Unbalanced parentheses keep the successfully parsed content and record a warning, rather than flattening the input into one text node.
 - Standalone punctuation degrades to a text node of its literal form (`?`, `!=`, `..`); a stray `)` reads as nothing.
 - A quoted value is literal text: `genre:"true"` is a substring match, never the boolean presence check that the unquoted `genre:true` means. A relational comparator on a text field (`author:>=Sanderson`) degrades to its visible text form rather than dropping the query.
+- Wildcard and list matchers on text fields: `field:base*` (Prefix), `field:*base` (Suffix), `field:(a,b)` (In). Unquoted single-word values only; a quoted value is literal text and never intercepted by wildcards or boolean presence checks.
 - The lexer handles quotes, backslash escapes (`\"`, `\\`), and unicode safely without panicking; `Display` escapes backslashes before quotes so rendering round-trips.
 
 ## 4. Relevance Ranking and Fuzzy Matching

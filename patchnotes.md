@@ -1,5 +1,25 @@
 # vir-search Patch Notes
 
+## v1.3.0 (2026-09-04)
+
+**Phase 2: grammar expansion.** Three new query surfaces, all round-trip
+safe and spanned by the 1.2.0 diagnostics:
+
+*   **Relative dates**: `added:in3days` (and the general `in<N>days`),
+    `added:lastmonth`, `added:nextmonth`, plus compact offsets `added:+7d`
+    and `added:-14d`. New `DateSpec::InDays/LastMonth/NextMonth` with
+    resolution arms (month neighbors handle year boundaries).
+*   **Wildcard and list matchers** on text fields: `genre:ambient*` is
+    `Prefix`, `genre:*metal` is `Suffix`, and `genre:(rock,jazz)` is
+    `In` (no spaces inside the list; a quoted value is still literal).
+    One star per term; `*both*` stays a literal substring.
+*   **Human durations** on Real fields: `duration:>=1h30m` and
+    `duration:>90m` parse to seconds (h/m/s/d chains sum), and magnitude
+    suffixes scale (`320k` -> 320000, `50mb` -> 5e7). A bare `m` means
+    minutes; megabytes are written `mb`.
+
+Suite: 47 green (19 unit + 25 parse + 3 rank).
+
 ## v1.2.0 (2026-09-04)
 
 **Phase 2: diagnostic spans.** The lexer keeps each token's byte span

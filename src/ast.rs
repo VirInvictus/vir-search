@@ -29,6 +29,12 @@ pub enum MatchKind {
     Exact(String),
     Regex(String),
     Fuzzy(String),
+    /// `foo*`: the value starts with the base.
+    Prefix(String),
+    /// `*bar`: the value ends with the base.
+    Suffix(String),
+    /// `(a,b)`: the value equals any of the list.
+    In(Vec<String>),
     HasAny,
     HasNone,
 }
@@ -65,8 +71,11 @@ pub enum DateSpec {
     LastWeek,
     NextWeek,
     ThisMonth,
+    LastMonth,
+    NextMonth,
     ThisYear,
     DaysAgo(u32),
+    InDays(u32),
     Ymd(i32, Option<u32>, Option<u32>),
 }
 
@@ -80,8 +89,11 @@ impl fmt::Display for DateSpec {
             Self::LastWeek => write!(f, "lastweek"),
             Self::NextWeek => write!(f, "nextweek"),
             Self::ThisMonth => write!(f, "thismonth"),
+            Self::LastMonth => write!(f, "lastmonth"),
+            Self::NextMonth => write!(f, "nextmonth"),
             Self::ThisYear => write!(f, "thisyear"),
             Self::DaysAgo(n) => write!(f, "{n}daysago"),
+            Self::InDays(n) => write!(f, "in{n}days"),
             Self::Ymd(y, None, _) => write!(f, "{y:04}"),
             Self::Ymd(y, Some(m), None) => write!(f, "{y:04}-{m:02}"),
             Self::Ymd(y, Some(m), Some(d)) => write!(f, "{y:04}-{m:02}-{d:02}"),
@@ -165,6 +177,11 @@ fn write_field<F: ParseField>(
         MatchKind::Exact(v) => write!(f, "{name}:={}", quote_if_needed(v)),
         MatchKind::Regex(v) => write!(f, "{name}:~{}", quote_if_needed(v)),
         MatchKind::Fuzzy(v) => write!(f, "{name}:?{}", quote_if_needed(v)),
+        // The wildcard forms are single-word by construction (the parser only
+        // honors them on unquoted barewords), so they re-lex to themselves.
+        MatchKind::Prefix(v) => write!(f, "{name}:{v}*"),
+        MatchKind::Suffix(v) => write!(f, "{name}:*{v}"),
+        MatchKind::In(items) => write!(f, "{name}:({})", items.join(",")),
         MatchKind::HasAny => write!(f, "{name}:true"),
         MatchKind::HasNone => write!(f, "{name}:false"),
     }
