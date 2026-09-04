@@ -1,5 +1,16 @@
 # vir-search Patch Notes
 
+## v1.4.0 (2026-09-04)
+
+**Phase 2: AST inspector traits.** `Visitor` (read-only, parents before
+children, `enter` returning `false` skips a subtree) and `Folder`
+(bottom-up, `fold_node` replaces each node after its children), both as
+`Expr::visit` / `Expr::fold_nodes`. This is what hosts use to extract active
+states and fields, check SQL-eligibility, or apply structural rewrites
+without hand-rolling traversal. The method names deliberately avoid `fold`
+to not collide with the accent-folding `fold` module. Suite: 49 green
+(19 unit + 27 parse + 3 rank).
+
 ## v1.3.0 (2026-09-04)
 
 **Phase 2: grammar expansion.** Three new query surfaces, all round-trip

@@ -526,3 +526,84 @@ fn duration_values_parse_for_real_fields() {
         }
     );
 }
+
+#[test]
+fn visitor_walks_and_can_skip_subtrees() {
+    use vir_search::ast::Visitor;
+
+    struct Count {
+        fields: usize,
+        states: usize,
+        prefix: Option<String>,
+    }
+    impl Visitor<TestField, TestState> for Count {
+        fn enter(&mut self, expr: &Expr<TestField, TestState>) -> bool {
+            match expr {
+                Expr::Field { kind, .. } => {
+                    self.fields += 1;
+                    if let MatchKind::Prefix(base) = kind {
+                        self.prefix = Some(base.clone());
+                    }
+                }
+                Expr::State(_) => self.states += 1,
+                _ => {}
+            }
+            true
+        }
+    }
+
+    let p = parse::<TestField, TestState, TestSort>(
+        "genre:ambient* AND rating:>=4 AND NOT is:finished",
+    );
+    let mut c = Count {
+        fields: 0,
+        states: 0,
+        prefix: None,
+    };
+    p.expr.visit(&mut c);
+    assert_eq!(c.fields, 1); // genre Prefix (rating:>=4 is a Compare node)
+    assert_eq!(c.states, 1);
+    assert_eq!(c.prefix.as_deref(), Some("ambient"));
+
+    // enter=false skips the subtree: walking under a NOT is optional.
+    struct SkipNot {
+        states: usize,
+    }
+    impl Visitor<TestField, TestState> for SkipNot {
+        fn enter(&mut self, expr: &Expr<TestField, TestState>) -> bool {
+            if matches!(expr, Expr::Not(_)) {
+                return false;
+            }
+            if matches!(expr, Expr::State(_)) {
+                self.states += 1;
+            }
+            true
+        }
+    }
+    let mut s = SkipNot { states: 0 };
+    p.expr.visit(&mut s);
+    assert_eq!(s.states, 0); // the NOT's is:finished was skipped
+}
+
+#[test]
+fn folder_transforms_bottom_up() {
+    use vir_search::ast::Folder;
+
+    struct UnNot;
+    impl Folder<TestField, TestState> for UnNot {
+        fn fold_node(&mut self, expr: Expr<TestField, TestState>) -> Expr<TestField, TestState> {
+            match expr {
+                // NOT NOT x folds to x during the walk.
+                Expr::Not(inner) => match *inner {
+                    Expr::Not(inner2) => *inner2,
+                    other => Expr::Not(Box::new(other)),
+                },
+                other => other,
+            }
+        }
+    }
+
+    let p = parse::<TestField, TestState, TestSort>("NOT NOT is:starred");
+    let folded = p.expr.fold_nodes(&mut UnNot);
+    assert_eq!(folded, Expr::State(TestState::Starred));
+}

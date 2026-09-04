@@ -7,8 +7,8 @@ pub mod parse;
 pub mod rank;
 
 pub use ast::{
-    Comparator, DateSpec, Expr, FieldType, MatchKind, ParseField, ParseSort, ParseState, SortSpec,
-    Value,
+    Comparator, DateSpec, Expr, FieldType, Folder, MatchKind, ParseField, ParseSort, ParseState,
+    SortSpec, Value, Visitor,
 };
 pub use fold::fold;
 pub use parse::{Diagnostic, ParseResult, PerspectiveResolver, parse, parse_with_resolver};

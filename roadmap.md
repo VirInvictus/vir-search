@@ -15,7 +15,7 @@
 - [x] **Relative Date Grammar Expansion:** Add `in3days`, `lastmonth`, `nextmonth`, `+7d` offset parsing. (Impacts: Atrium forward-looking tasks, Conservatory audio timelines). *(Shipped 1.3.0: `InDays`/`LastMonth`/`NextMonth` variants with resolution and Display round-trips; `-14d` compact form rides along.)*
 - [x] **Prefix, Suffix, and `IN` AST Matchers:** Add `MatchKind::Prefix` (`foo*`), `Suffix` (`*bar`), and `In` (`(a,b)`). Allows Atrium/Conservatory to use SQLite index scans instead of heavyweight regex queries. *(Shipped 1.3.0: unquoted single-word values only; quoted values stay literal substring; Display round-trips.)*
 - [x] **Human Duration Unit Parsing:** Support `1h30m`, `320k`, `50MB` normalizations. (Impacts: Conservatory track lengths, Atrium `estimated` times). *(Shipped 1.3.0: h/m/s/d chains sum to seconds for Real fields; k/mb/gb magnitude suffixes scale; bare `m` is minutes.)*
-- [ ] **Generic AST Inspector Traits:** Introduce `Visitor` and `Folder` to quickly extract active states, fields, and check if an AST is SQL-eligible.
+- [x] **Generic AST Inspector Traits:** Introduce `Visitor` and `Folder` to quickly extract active states, fields, and check if an AST is SQL-eligible. *(Shipped 1.4.0: `Expr::visit` with subtree skipping, `Expr::fold_nodes` bottom-up; trait methods named `enter`/`fold_node` so they do not collide with the accent-folding `fold` module.)*
 - [ ] **Viaduct Integration Blueprint:** Map RSS concepts (`feed:`, `is:unread`) into `vir-search` traits and adopt it inside Viaduct's timeline filter.
 
 ## Phase 3: Robustness & Logic Bug Fixes (2026-08-23)

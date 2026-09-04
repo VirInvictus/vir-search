@@ -150,6 +150,50 @@ pub enum Expr<F, S> {
     Or(Vec<Expr<F, S>>),
 }
 
+/// Read-only AST inspection. `enter` is called for every node, parents before
+/// children; returning `false` skips that node's children. Implement only the
+/// hooks you need — the node itself carries everything, so `enter` alone is
+/// enough for counting, collection, and SQL-eligibility checks.
+pub trait Visitor<F, S> {
+    fn enter(&mut self, _expr: &Expr<F, S>) -> bool {
+        true
+    }
+}
+
+/// Bottom-up transformation: `fold_node` receives each node with its children
+/// already folded, and its return replaces the node. A no-op `fold_node`
+/// rebuilds the tree unchanged.
+pub trait Folder<F, S> {
+    fn fold_node(&mut self, expr: Expr<F, S>) -> Expr<F, S> {
+        expr
+    }
+}
+
+impl<F: ParseField, S: ParseState> Expr<F, S> {
+    /// Depth-first read-only walk (parents before children).
+    pub fn visit<V: Visitor<F, S>>(&self, v: &mut V) {
+        if !v.enter(self) {
+            return;
+        }
+        match self {
+            Expr::Not(inner) => inner.visit(v),
+            Expr::And(items) | Expr::Or(items) => items.iter().for_each(|e| e.visit(v)),
+            _ => {}
+        }
+    }
+
+    /// Depth-first transformation (children before the parent).
+    pub fn fold_nodes<V: Folder<F, S>>(self, f: &mut V) -> Expr<F, S> {
+        let expr = match self {
+            Expr::Not(inner) => Expr::Not(Box::new(inner.fold_nodes(f))),
+            Expr::And(items) => Expr::And(items.into_iter().map(|e| e.fold_nodes(f)).collect()),
+            Expr::Or(items) => Expr::Or(items.into_iter().map(|e| e.fold_nodes(f)).collect()),
+            leaf => leaf,
+        };
+        f.fold_node(expr)
+    }
+}
+
 impl<F: ParseField, S: ParseState> fmt::Display for Expr<F, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
