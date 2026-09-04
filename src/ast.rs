@@ -1,4 +1,4 @@
-//! The typed AST and its round-trippable `Display` (spec §3.4).
+//! The typed AST and its round-trippable `Display`.
 
 use std::fmt;
 
@@ -212,7 +212,9 @@ pub fn quote_if_needed(s: &str) -> String {
         || s.eq_ignore_ascii_case("or")
         || s.eq_ignore_ascii_case("not");
     if needs {
-        format!("\"{}\"", s.replace('"', "\\\""))
+        // Backslash first, so an escaped quote's own backslash is not doubled.
+        let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
+        format!("\"{escaped}\"")
     } else {
         s.to_string()
     }

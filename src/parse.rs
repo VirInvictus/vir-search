@@ -9,7 +9,9 @@ pub struct ParseResult<F, S, K> {
     pub warnings: Vec<String>,
 }
 
-type PResult<F, S> = Result<Expr<F, S>, ()>;
+/// Constructor for `Expr::And` / `Expr::Or`, kept in a type alias because the
+/// bare fn-pointer type trips `clippy::type_complexity`.
+type Combiner<F, S> = fn(Vec<Expr<F, S>>) -> Expr<F, S>;
 
 pub trait PerspectiveResolver<F, S> {
     fn expression(&self, name: &str) -> Option<String>;
@@ -51,9 +53,8 @@ fn parse_inner<F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolve
         seen: seen.to_vec(),
         _marker: std::marker::PhantomData,
     };
-    let expr = p.boolean_expr().unwrap_or_else(|_| Expr::Empty);
     ParseResult {
-        expr,
+        expr: p.boolean_expr(),
         sorts: p.sorts,
         warnings: p.warnings,
     }
@@ -82,32 +83,21 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
         Some(t)
     }
 
-    fn boolean_expr(&mut self) -> PResult<F, S> {
-        let mut items = vec![self.boolean_term()?];
+    fn boolean_expr(&mut self) -> Expr<F, S> {
+        let mut items = vec![self.boolean_term()];
         while let Some(Token::Word(w)) = self.peek() {
             if w.eq_ignore_ascii_case("or") {
                 self.pos += 1;
-                items.push(self.boolean_term()?);
+                items.push(self.boolean_term());
             } else {
                 break;
             }
         }
-        if items.len() == 1 {
-            Ok(items.pop().unwrap())
-        } else {
-            items.retain(|e| !matches!(e, Expr::Empty));
-            if items.is_empty() {
-                Ok(Expr::Empty)
-            } else if items.len() == 1 {
-                Ok(items.pop().unwrap())
-            } else {
-                Ok(Expr::Or(items))
-            }
-        }
+        self.combine(items, Expr::Or)
     }
 
-    fn boolean_term(&mut self) -> PResult<F, S> {
-        let mut items = vec![self.boolean_factor()?];
+    fn boolean_term(&mut self) -> Expr<F, S> {
+        let mut items = vec![self.boolean_factor()];
         while let Some(t) = self.peek() {
             if t == &Token::RParen {
                 break;
@@ -118,52 +108,66 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
                 }
                 if w.eq_ignore_ascii_case("and") {
                     self.pos += 1;
-                    items.push(self.boolean_factor()?);
+                    items.push(self.boolean_factor());
                     continue;
                 }
             }
-            items.push(self.boolean_factor()?);
+            items.push(self.boolean_factor());
         }
+        self.combine(items, Expr::And)
+    }
+
+    /// Fold `Empty` out of a combinator's operands so a degraded fragment never
+    /// dangles: one survivor is the whole node, none is `Empty`.
+    fn combine(&self, mut items: Vec<Expr<F, S>>, ctor: Combiner<F, S>) -> Expr<F, S> {
         if items.len() == 1 {
-            Ok(items.pop().unwrap())
-        } else {
-            items.retain(|e| !matches!(e, Expr::Empty));
-            if items.is_empty() {
-                Ok(Expr::Empty)
-            } else if items.len() == 1 {
-                Ok(items.pop().unwrap())
-            } else {
-                Ok(Expr::And(items))
-            }
+            return items.pop().unwrap();
+        }
+        items.retain(|e| !matches!(e, Expr::Empty));
+        match items.len() {
+            0 => Expr::Empty,
+            1 => items.pop().unwrap(),
+            _ => ctor(items),
         }
     }
 
-    fn boolean_factor(&mut self) -> PResult<F, S> {
-        if let Some(Token::Bang) = self.peek() {
-            self.pos += 1;
-            return Ok(Expr::Not(Box::new(self.predicate()?)));
-        }
-        if let Some(Token::Word(w)) = self.peek() {
-            if w.eq_ignore_ascii_case("not") {
-                self.pos += 1;
-                return Ok(Expr::Not(Box::new(self.predicate()?)));
+    fn boolean_factor(&mut self) -> Expr<F, S> {
+        let mut negations = 0usize;
+        loop {
+            match self.peek() {
+                Some(Token::Bang) => {
+                    self.pos += 1;
+                    negations += 1;
+                }
+                Some(Token::Word(w)) if w.eq_ignore_ascii_case("not") => {
+                    self.pos += 1;
+                    negations += 1;
+                }
+                _ => break,
             }
         }
-        self.predicate()
+        let mut expr = self.predicate();
+        for _ in 0..negations {
+            expr = Expr::Not(Box::new(expr));
+        }
+        expr
     }
 
-    fn predicate(&mut self) -> PResult<F, S> {
-        let t = self.advance().ok_or(())?;
+    fn predicate(&mut self) -> Expr<F, S> {
+        // EOF is a degraded fragment, not an error: the combinators above fold
+        // `Empty` out, so a trailing operator keeps what already parsed.
+        let Some(t) = self.advance() else {
+            return Expr::Empty;
+        };
         match t {
             Token::LParen => {
-                let inner = self.boolean_expr()?;
-                if let Some(Token::RParen) = self.peek() {
+                let inner = self.boolean_expr();
+                if self.peek() == Some(&Token::RParen) {
                     self.pos += 1;
-                    Ok(inner)
                 } else {
                     self.warnings.push("unclosed parenthesis".into());
-                    Ok(text_or_empty(format!("({inner}")))
                 }
+                inner
             }
             Token::Word(w) => {
                 let w_clone = w.clone();
@@ -172,18 +176,24 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
                     let lname = w_clone.to_ascii_lowercase();
                     match lname.as_str() {
                         "is" => {
-                            let val = self.value_string().ok_or(())?;
+                            let Some(val) = self.value_string() else {
+                                self.warnings.push("missing value for is:".into());
+                                return text_or_empty("is:".into());
+                            };
                             match S::parse(&val.to_ascii_lowercase()) {
-                                Some(s) => Ok(Expr::State(s)),
+                                Some(s) => Expr::State(s),
                                 None => {
                                     self.warnings
                                         .push(format!("unknown state {val:?}; matching as text"));
-                                    Ok(Expr::Text(format!("is:{val}")))
+                                    text_or_empty(format!("is:{val}"))
                                 }
                             }
                         }
                         "sort" => {
-                            let val = self.value_string().ok_or(())?;
+                            let Some(val) = self.value_string() else {
+                                self.warnings.push("missing value for sort:".into());
+                                return text_or_empty("sort:".into());
+                            };
                             let (key_str, desc) = if let Some(stripped) = val.strip_prefix('-') {
                                 (stripped.to_string(), true)
                             } else if let Some(stripped) = val.strip_prefix('+') {
@@ -194,7 +204,10 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
                             self.sort_spec(key_str, desc)
                         }
                         "vl" => {
-                            let val = self.value_string().ok_or(())?;
+                            let Some(val) = self.value_string() else {
+                                self.warnings.push("missing value for vl:".into());
+                                return text_or_empty("vl:".into());
+                            };
                             self.resolve_vl(&val)
                         }
                         _ => match F::parse(&lname) {
@@ -213,141 +226,179 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
                                 let remainder = self.value_string().unwrap_or_default();
                                 self.warnings
                                     .push(format!("unknown field {w_clone:?}; matching as text"));
-                                Ok(text_or_empty(format!("{w_clone}:{remainder}")))
+                                text_or_empty(format!("{w_clone}:{remainder}"))
                             }
                         },
                     }
                 } else {
-                    Ok(text_or_empty(w_clone))
+                    text_or_empty(w_clone)
                 }
             }
-            Token::Quoted(q) => Ok(text_or_empty(q.clone())),
-            Token::Colon
-            | Token::RParen
-            | Token::Eq
-            | Token::Ne
-            | Token::Lt
-            | Token::Le
-            | Token::Gt
-            | Token::Ge
-            | Token::Tilde
-            | Token::Quest
-            | Token::DotDot
-            | Token::Bang => {
-                let mut fallback = String::new();
-                if let Token::Colon = &t {
-                    fallback.push(':');
-                }
-                if let Token::Eq = &t {
-                    fallback.push('=');
-                }
-                if let Token::Tilde = &t {
-                    fallback.push('~');
-                }
-                Ok(text_or_empty(fallback))
-            }
+            Token::Quoted(q) => text_or_empty(q),
+            Token::RParen => Expr::Empty,
+            Token::Colon => text_or_empty(":".into()),
+            Token::Eq => text_or_empty("=".into()),
+            Token::Ne => text_or_empty("!=".into()),
+            Token::Lt => text_or_empty("<".into()),
+            Token::Le => text_or_empty("<=".into()),
+            Token::Gt => text_or_empty(">".into()),
+            Token::Ge => text_or_empty(">=".into()),
+            Token::Tilde => text_or_empty("~".into()),
+            Token::Quest => text_or_empty("?".into()),
+            Token::DotDot => text_or_empty("..".into()),
+            Token::Bang => text_or_empty("!".into()),
         }
     }
 
-    fn sort_spec(&mut self, key_str: String, descending: bool) -> PResult<F, S> {
+    fn sort_spec(&mut self, key_str: String, descending: bool) -> Expr<F, S> {
         match K::parse(&key_str.to_ascii_lowercase()) {
             Some(k) => {
                 self.sorts.push(SortSpec { key: k, descending });
-                Ok(Expr::Empty)
+                Expr::Empty
             }
             None => {
                 self.warnings.push(format!("unknown sort key {key_str:?}"));
                 let pfx = if descending { "-" } else { "" };
-                Ok(Expr::Text(format!("sort:{pfx}{key_str}")))
+                text_or_empty(format!("sort:{pfx}{key_str}"))
             }
         }
     }
 
-    fn text_match(&mut self, field: F) -> PResult<F, S> {
-        let pk = self.peek();
-        match pk {
+    fn text_match(&mut self, field: F) -> Expr<F, S> {
+        match self.peek() {
             Some(Token::Eq) => {
                 self.pos += 1;
-                let val = self.value_string().ok_or(())?;
-                Ok(Expr::Field {
-                    field,
-                    kind: MatchKind::Exact(val),
-                })
+                match self.value_string() {
+                    Some(val) => Expr::Field {
+                        field,
+                        kind: MatchKind::Exact(val),
+                    },
+                    None => {
+                        self.warnings.push(format!("missing value for {field}:="));
+                        text_or_empty(format!("{field}:="))
+                    }
+                }
             }
             Some(Token::Tilde) => {
                 self.pos += 1;
-                let val = self.value_string().ok_or(())?;
-                Ok(Expr::Field {
-                    field,
-                    kind: MatchKind::Regex(val),
-                })
+                match self.value_string() {
+                    Some(val) => Expr::Field {
+                        field,
+                        kind: MatchKind::Regex(val),
+                    },
+                    None => {
+                        self.warnings.push(format!("missing value for {field}:~"));
+                        text_or_empty(format!("{field}:~"))
+                    }
+                }
             }
             Some(Token::Quest) => {
                 self.pos += 1;
-                let val = self.value_string().ok_or(())?;
-                Ok(Expr::Field {
-                    field,
-                    kind: MatchKind::Fuzzy(val),
-                })
+                match self.value_string() {
+                    Some(val) => Expr::Field {
+                        field,
+                        kind: MatchKind::Fuzzy(val),
+                    },
+                    None => {
+                        self.warnings.push(format!("missing value for {field}:?"));
+                        text_or_empty(format!("{field}:?"))
+                    }
+                }
+            }
+            // A relational comparator on a text field is meaningless; degrade
+            // to the visible text form (the bad-numeric-value pattern below)
+            // instead of discarding the query.
+            Some(Token::Ne | Token::Lt | Token::Le | Token::Gt | Token::Ge) => {
+                let prefix = self.eat_comparator().map(|c| c.as_str()).unwrap_or("");
+                match self.value_string() {
+                    Some(val) => {
+                        self.warnings.push(format!(
+                            "relational comparator on text field {field}; matching as text"
+                        ));
+                        text_or_empty(format!("{field}:{prefix}{val}"))
+                    }
+                    None => {
+                        self.warnings
+                            .push(format!("missing value for {field}:{prefix}"));
+                        text_or_empty(format!("{field}:{prefix}"))
+                    }
+                }
             }
             _ => {
-                let val = self.value_string().ok_or(())?;
-                if let Some(b) = bool_word(&val) {
-                    Ok(Expr::Field {
-                        field,
-                        kind: if b {
-                            MatchKind::HasAny
-                        } else {
-                            MatchKind::HasNone
-                        },
-                    })
-                } else {
-                    Ok(Expr::Field {
-                        field,
-                        kind: MatchKind::Substring(val),
-                    })
+                let quoted = matches!(self.peek(), Some(Token::Quoted(_)));
+                let Some(val) = self.value_string() else {
+                    self.warnings.push(format!("missing value for {field}:"));
+                    return text_or_empty(format!("{field}:"));
+                };
+                // A quoted value is literal text: `genre:"true"` is a substring
+                // match, never the boolean presence check `genre:true` means.
+                if !quoted {
+                    if let Some(b) = bool_word(&val) {
+                        return Expr::Field {
+                            field,
+                            kind: if b {
+                                MatchKind::HasAny
+                            } else {
+                                MatchKind::HasNone
+                            },
+                        };
+                    }
+                }
+                Expr::Field {
+                    field,
+                    kind: MatchKind::Substring(val),
                 }
             }
         }
     }
 
-    fn relational(&mut self, field: F) -> PResult<F, S> {
+    fn relational(&mut self, field: F) -> Expr<F, S> {
         let comp = self.eat_comparator();
-        let raw = self.value_string().ok_or(())?;
-        // Handle :true/:false presence checks even on numeric/date fields
-        if comp.is_none() {
+        let prefix = comp.map(|c| c.as_str()).unwrap_or("").to_string();
+        let quoted = matches!(self.peek(), Some(Token::Quoted(_)));
+        let Some(raw) = self.value_string() else {
+            self.warnings
+                .push(format!("missing value for {field}:{prefix}"));
+            return text_or_empty(format!("{field}:{prefix}"));
+        };
+        // Handle :true/:false presence checks even on numeric/date fields (a
+        // quoted value is literal text, never the presence check).
+        if comp.is_none() && !quoted {
             if let Some(b) = bool_word(&raw) {
-                return Ok(Expr::Field {
+                return Expr::Field {
                     field,
                     kind: if b {
                         MatchKind::HasAny
                     } else {
                         MatchKind::HasNone
                     },
-                });
+                };
             }
         }
         let Some(low) = parse_typed_value(field.clone(), &raw) else {
             self.warnings
                 .push(format!("bad numeric/date value {raw:?}; matching as text"));
-            let prefix = comp.map(|c| c.as_str()).unwrap_or("");
-            return Ok(Expr::Text(format!("{field}:{prefix}{raw}")));
+            return text_or_empty(format!("{field}:{prefix}{raw}"));
         };
         if comp.is_none() && matches!(self.peek(), Some(Token::DotDot)) {
             self.pos += 1;
-            let raw_hi = self.value_string().ok_or(())?;
+            let Some(raw_hi) = self.value_string() else {
+                self.warnings
+                    .push(format!("missing value for {field}:{raw}.."));
+                return text_or_empty(format!("{field}:{raw}.."));
+            };
             if let Some(high) = parse_typed_value(field.clone(), &raw_hi) {
-                return Ok(Expr::Range { field, low, high });
+                return Expr::Range { field, low, high };
             }
             self.warnings
                 .push(format!("bad range bound {raw_hi:?}; matching as text"));
-            return Ok(Expr::Text(format!("{field}:{raw}..{raw_hi}")));
+            return text_or_empty(format!("{field}:{raw}..{raw_hi}"));
         }
-        Ok(Expr::Compare {
+        Expr::Compare {
             field,
             comp: comp.unwrap_or(Comparator::Eq),
             value: low,
-        })
+        }
     }
 
     fn eat_comparator(&mut self) -> Option<Comparator> {
@@ -375,27 +426,27 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
         }
     }
 
-    fn resolve_vl(&mut self, name: &str) -> PResult<F, S> {
+    fn resolve_vl(&mut self, name: &str) -> Expr<F, S> {
         let key = name.to_ascii_lowercase();
         let Some(resolver) = self.resolver else {
-            return Ok(Expr::Text(format!("vl:{name}")));
+            return text_or_empty(format!("vl:{name}"));
         };
         if self.seen.iter().any(|s| s == &key) {
             self.warnings
                 .push(format!("perspective cycle at {name:?}; ignored"));
-            return Ok(Expr::Empty);
+            return Expr::Empty;
         }
         let Some(text) = resolver.expression(name) else {
             self.warnings
                 .push(format!("unknown perspective {name:?}; ignored"));
-            return Ok(Expr::Empty);
+            return Expr::Empty;
         };
         let mut seen = self.seen.clone();
         seen.push(key);
         let sub = parse_inner(&text, self.resolver, &seen);
         self.warnings.extend(sub.warnings);
         self.sorts.extend(sub.sorts);
-        Ok(sub.expr)
+        sub.expr
     }
 }
 
@@ -431,7 +482,10 @@ fn parse_date_spec(raw: &str) -> Option<DateSpec> {
     match s.as_str() {
         "today" => return Some(DateSpec::Today),
         "yesterday" => return Some(DateSpec::Yesterday),
+        "tomorrow" => return Some(DateSpec::Tomorrow),
         "thisweek" => return Some(DateSpec::ThisWeek),
+        "lastweek" => return Some(DateSpec::LastWeek),
+        "nextweek" => return Some(DateSpec::NextWeek),
         "thismonth" => return Some(DateSpec::ThisMonth),
         "thisyear" => return Some(DateSpec::ThisYear),
         _ => {}

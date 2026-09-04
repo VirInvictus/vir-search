@@ -1,5 +1,8 @@
 use std::collections::HashMap;
-use vir_search::ast::{Expr, FieldType, ParseField, ParseSort, ParseState, SortSpec};
+use vir_search::ast::{
+    Comparator, DateSpec, Expr, FieldType, MatchKind, ParseField, ParseSort, ParseState, SortSpec,
+    Value,
+};
 use vir_search::parse::{PerspectiveResolver, parse, parse_with_resolver};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,6 +151,14 @@ fn round_trips() {
         "title:\"a..b\"",
         "\"or\" boards",
         "\"not\"",
+        "added:tomorrow",
+        "added:lastweek",
+        "added:nextweek",
+        "NOT NOT is:starred",
+        "genre:ambient AND",
+        "author:>=Sanderson",
+        "a AND !",
+        "title:\"a\\\\b\"",
     ] {
         round_trip(input);
     }
@@ -177,10 +188,141 @@ fn unknown_field_degrades_to_text() {
 }
 
 #[test]
-fn unbalanced_parens_degrade_whole_input() {
+fn unbalanced_parens_keep_parsed_content() {
     let p = parse::<TestField, TestState, TestSort>("(genre:ambient");
-    assert_eq!(p.expr, Expr::Text("(genre:ambient".into()));
+    assert_eq!(
+        p.expr,
+        parse::<TestField, TestState, TestSort>("genre:ambient").expr
+    );
     assert!(!p.warnings.is_empty());
+}
+
+#[test]
+fn date_keywords_parse() {
+    for (kw, spec) in [
+        ("tomorrow", DateSpec::Tomorrow),
+        ("lastweek", DateSpec::LastWeek),
+        ("nextweek", DateSpec::NextWeek),
+    ] {
+        let p = parse::<TestField, TestState, TestSort>(&format!("added:{kw}"));
+        assert_eq!(
+            p.expr,
+            Expr::Compare {
+                field: TestField::Added,
+                comp: Comparator::Eq,
+                value: Value::Date(spec),
+            },
+            "date keyword {kw} did not parse"
+        );
+    }
+}
+
+#[test]
+fn double_negation_negates_twice() {
+    let p = parse::<TestField, TestState, TestSort>("NOT NOT is:starred");
+    assert_eq!(
+        p.expr,
+        Expr::Not(Box::new(Expr::Not(Box::new(Expr::State(
+            TestState::Starred
+        )))))
+    );
+}
+
+#[test]
+fn dangling_operator_keeps_parsed_side() {
+    for input in ["genre:ambient AND", "genre:ambient OR"] {
+        let p = parse::<TestField, TestState, TestSort>(input);
+        assert_eq!(
+            p.expr,
+            parse::<TestField, TestState, TestSort>("genre:ambient").expr,
+            "trailing operator collapsed {input:?}"
+        );
+    }
+}
+
+#[test]
+fn missing_value_degrades_to_visible_text() {
+    for input in ["genre:", "title:=", "added:", "author:>="] {
+        let p = parse::<TestField, TestState, TestSort>(input);
+        assert_eq!(
+            p.expr,
+            Expr::Text(input.into()),
+            "missing value collapsed {input:?}"
+        );
+        assert!(!p.warnings.is_empty());
+    }
+}
+
+#[test]
+fn quoted_bool_word_is_substring_not_presence() {
+    let p = parse::<TestField, TestState, TestSort>("genre:\"true\"");
+    assert_eq!(
+        p.expr,
+        Expr::Field {
+            field: TestField::Genre,
+            kind: MatchKind::Substring("true".into()),
+        }
+    );
+    // The unquoted form is still the presence check.
+    let p = parse::<TestField, TestState, TestSort>("genre:true");
+    assert_eq!(
+        p.expr,
+        Expr::Field {
+            field: TestField::Genre,
+            kind: MatchKind::HasAny,
+        }
+    );
+}
+
+#[test]
+fn relational_on_text_field_degrades_to_text() {
+    let p = parse::<TestField, TestState, TestSort>("author:>=Sanderson");
+    assert_eq!(p.expr, Expr::Text("author:>=Sanderson".into()));
+    assert!(!p.warnings.is_empty());
+    // The rest of the query survives; no whole-query collapse.
+    let p = parse::<TestField, TestState, TestSort>("author:>=Sanderson genre:ambient");
+    assert_eq!(
+        p.expr,
+        parse::<TestField, TestState, TestSort>("author:>=Sanderson AND genre:ambient").expr
+    );
+}
+
+#[test]
+fn standalone_punctuation_degrades_to_visible_text() {
+    assert_eq!(
+        parse::<TestField, TestState, TestSort>("?").expr,
+        Expr::Text("?".into())
+    );
+    assert_eq!(
+        parse::<TestField, TestState, TestSort>("..").expr,
+        Expr::Text("..".into())
+    );
+    // A stray closer reads as nothing; that is its only sensible meaning.
+    assert_eq!(
+        parse::<TestField, TestState, TestSort>(")").expr,
+        Expr::Empty
+    );
+}
+
+#[test]
+fn backslash_escapes_in_quoted_strings() {
+    // `\\` is a literal backslash and no longer swallows the closing quote.
+    let p = parse::<TestField, TestState, TestSort>("title:\"a\\\\b\"");
+    assert_eq!(
+        p.expr,
+        Expr::Field {
+            field: TestField::Title,
+            kind: MatchKind::Substring("a\\b".into()),
+        }
+    );
+    let p = parse::<TestField, TestState, TestSort>("album:\"c:\\\\\"");
+    assert_eq!(
+        p.expr,
+        Expr::Field {
+            field: TestField::Album,
+            kind: MatchKind::Substring("c:\\".into()),
+        }
+    );
 }
 
 #[test]

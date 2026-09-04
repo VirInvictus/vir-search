@@ -1,5 +1,5 @@
-//! Tokenizer (spec §3.4). Best-effort: it never fails, so the parser can decide
-//! how to degrade malformed input. Ported in shape from `atrium-search`.
+//! Tokenizer. Best-effort: it never fails, so the parser can decide
+//! how to degrade malformed input.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
@@ -95,15 +95,28 @@ fn two(chars: &[char], i: &mut usize, second: char, both: Token, single: Token) 
     }
 }
 
-/// Scan a `"..."` string (supports `\"`). An unterminated quote runs to EOF.
+/// Scan a `"..."` string (supports `\"` and `\\`). An unterminated quote runs
+/// to EOF.
 fn scan_quoted(chars: &[char], i: &mut usize) -> String {
     *i += 1; // opening quote
     let mut out = String::new();
     while *i < chars.len() {
         let c = chars[*i];
-        if c == '\\' && chars.get(*i + 1) == Some(&'"') {
-            out.push('"');
-            *i += 2;
+        if c == '\\' {
+            match chars.get(*i + 1) {
+                Some('"') => {
+                    out.push('"');
+                    *i += 2;
+                }
+                Some('\\') => {
+                    out.push('\\');
+                    *i += 2;
+                }
+                _ => {
+                    out.push(c);
+                    *i += 1;
+                }
+            }
         } else if c == '"' {
             *i += 1;
             break;

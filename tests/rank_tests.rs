@@ -82,3 +82,9 @@ fn collects_only_bare_text() {
     let p = parse::<TestField, TestState, TestSort>("roygbiv boards genre:ambient rating:>=4");
     assert_eq!(collect_text_terms(&p.expr), vec!["roygbiv", "boards"]);
 }
+
+#[test]
+fn negated_terms_are_not_collected() {
+    let p = parse::<TestField, TestState, TestSort>("boards NOT ambient");
+    assert_eq!(collect_text_terms(&p.expr), vec!["boards"]);
+}
