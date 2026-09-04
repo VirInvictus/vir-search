@@ -32,7 +32,9 @@ Consumers must implement:
 
 The parser enforces a strict "never fail" policy, structurally: there is no
 error channel in the parse path, so a partial query can never take the whole
-query down with it.
+query down with it. Every degradation is also reported twice: as a string in
+`ParseResult.warnings` and as a `Diagnostic { message, start, end }` in
+`ParseResult.diagnostics`, carrying the byte span a UI should underline.
 - If a token resembles a field syntax (`unknown:value`) but the domain's `ParseField` implementation returns `None`, the parser emits a warning in the `ParseResult` and degrades the node to `Expr::Text("unknown:value")`.
 - A trailing logical operator (`foo AND`), a missing value (`genre:`, `title:=`), or EOF mid-expression degrades locally: what already parsed stands, the broken fragment becomes a visible text node carrying the partial expression, and a warning is recorded.
 - Unbalanced parentheses keep the successfully parsed content and record a warning, rather than flattening the input into one text node.

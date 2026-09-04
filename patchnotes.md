@@ -1,5 +1,18 @@
 # vir-search Patch Notes
 
+## v1.2.0 (2026-09-04)
+
+**Phase 2: diagnostic spans.** The lexer keeps each token's byte span
+(`lex_with_spans`), and `ParseResult` gains `diagnostics: Vec<Diagnostic>`
+(`message`, `start`, `end` byte offsets into the input, end exclusive). Every
+degradation that already produced a warning now also records the span a search
+bar should underline: the unknown field word, the field missing its value, the
+unclosed parenthesis (through end of input), the offending value on a bad
+numeric/date or range bound, the perspective name on cycles. `warnings` is
+unchanged and still carries every message; every diagnostic also appears there.
+`lex()` keeps its exact old signature. Consumers only read `ParseResult`, so
+the new field is additive. Suite: 41 green (18 unit + 20 parse + 3 rank).
+
 ## v1.1.0 (2026-09-04)
 
 **Phase 2: centralized fuzzy matching.** New `vir_search::fuzzy` module:

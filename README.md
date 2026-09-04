@@ -22,7 +22,7 @@ The library understands a deep, Calibre-compatible grammar:
 - **Sorts and Perspectives**: `sort:-added` extracts a sort directive; `vl:name` expands a named perspective through a resolver you provide.
 - **Logic**: Parentheses, `AND`, `OR`, `NOT` (including doubled negation).
 
-Degradation is local and visible: a quoted value is always literal text (`genre:"true"` is a substring match, not the `genre:true` presence check), a trailing operator or missing value keeps what already parsed, and every degraded fragment records a warning in `ParseResult.warnings`.
+Degradation is local and visible: a quoted value is always literal text (`genre:"true"` is a substring match, not the `genre:true` presence check), a trailing operator or missing value keeps what already parsed, and every degraded fragment records a warning in `ParseResult.warnings` plus a byte-spanned entry in `ParseResult.diagnostics`, so a UI can underline the exact broken fragment.
 
 ## Usage
 

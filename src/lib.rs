@@ -11,5 +11,5 @@ pub use ast::{
     Value,
 };
 pub use fold::fold;
-pub use parse::{ParseResult, PerspectiveResolver, parse, parse_with_resolver};
+pub use parse::{Diagnostic, ParseResult, PerspectiveResolver, parse, parse_with_resolver};
 pub use rank::{blend_relevance, collect_text_terms};

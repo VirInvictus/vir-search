@@ -1,12 +1,25 @@
 use crate::ast::{
     Comparator, DateSpec, Expr, MatchKind, ParseField, ParseSort, ParseState, SortSpec, Value,
 };
-use crate::lex::{Token, lex};
+use crate::lex::{Spanned, Token, lex_with_spans};
 
 pub struct ParseResult<F, S, K> {
     pub expr: Expr<F, S>,
     pub sorts: Vec<SortSpec<K>>,
     pub warnings: Vec<String>,
+    /// The warnings that carry a byte span in the input (`start..end`, end
+    /// exclusive), for search-bar underlines. Every diagnostic also appears
+    /// in `warnings`.
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// A degradation worth underlining: what went wrong and which bytes of the
+/// input are responsible.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Diagnostic {
+    pub message: String,
+    pub start: usize,
+    pub end: usize,
 }
 
 /// Constructor for `Expr::And` / `Expr::Or`, kept in a type alias because the
@@ -45,10 +58,12 @@ fn parse_inner<F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolve
     seen: &[String],
 ) -> ParseResult<F, S, K> {
     let mut p = Parser {
-        tokens: lex(input),
+        tokens: lex_with_spans(input),
         pos: 0,
+        input_len: input.len(),
         sorts: Vec::new(),
         warnings: Vec::new(),
+        diagnostics: Vec::new(),
         resolver,
         seen: seen.to_vec(),
         _marker: std::marker::PhantomData,
@@ -57,14 +72,17 @@ fn parse_inner<F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolve
         expr: p.boolean_expr(),
         sorts: p.sorts,
         warnings: p.warnings,
+        diagnostics: p.diagnostics,
     }
 }
 
 struct Parser<'a, F, S, K, R> {
-    tokens: Vec<Token>,
+    tokens: Vec<Spanned>,
     pos: usize,
+    input_len: usize,
     sorts: Vec<SortSpec<K>>,
     warnings: Vec<String>,
+    diagnostics: Vec<Diagnostic>,
     resolver: Option<&'a R>,
     seen: Vec<String>,
     _marker: std::marker::PhantomData<(F, S)>,
@@ -74,13 +92,37 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
     Parser<'a, F, S, K, R>
 {
     fn peek(&mut self) -> Option<&Token> {
-        self.tokens.get(self.pos)
+        self.tokens.get(self.pos).map(|s| &s.token)
+    }
+
+    fn advance_spanned(&mut self) -> Option<Spanned> {
+        let s = self.tokens.get(self.pos).cloned()?;
+        self.pos += 1;
+        Some(s)
     }
 
     fn advance(&mut self) -> Option<Token> {
-        let t = self.tokens.get(self.pos).cloned()?;
-        self.pos += 1;
-        Some(t)
+        self.advance_spanned().map(|s| s.token)
+    }
+
+    /// Byte span of the token just consumed (the value a warning is about),
+    /// or the whole input when nothing was consumed yet.
+    fn prev_span(&self) -> (usize, usize) {
+        self.tokens
+            .get(self.pos.wrapping_sub(1))
+            .map(|s| (s.start, s.end))
+            .unwrap_or((0, self.input_len))
+    }
+
+    /// Record a degradation in both lists: `warnings` stays the flat string
+    /// log, `diagnostics` carries the span to underline.
+    fn warn_spanned(&mut self, message: String, span: (usize, usize)) {
+        self.diagnostics.push(Diagnostic {
+            message: message.clone(),
+            start: span.0,
+            end: span.1,
+        });
+        self.warnings.push(message);
     }
 
     fn boolean_expr(&mut self) -> Expr<F, S> {
@@ -156,16 +198,17 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
     fn predicate(&mut self) -> Expr<F, S> {
         // EOF is a degraded fragment, not an error: the combinators above fold
         // `Empty` out, so a trailing operator keeps what already parsed.
-        let Some(t) = self.advance() else {
+        let Some(sp) = self.advance_spanned() else {
             return Expr::Empty;
         };
-        match t {
+        let t_span = (sp.start, sp.end);
+        match sp.token {
             Token::LParen => {
                 let inner = self.boolean_expr();
                 if self.peek() == Some(&Token::RParen) {
                     self.pos += 1;
                 } else {
-                    self.warnings.push("unclosed parenthesis".into());
+                    self.warn_spanned("unclosed parenthesis".into(), (t_span.0, self.input_len));
                 }
                 inner
             }
@@ -177,21 +220,23 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
                     match lname.as_str() {
                         "is" => {
                             let Some(val) = self.value_string() else {
-                                self.warnings.push("missing value for is:".into());
+                                self.warn_spanned("missing value for is:".into(), t_span);
                                 return text_or_empty("is:".into());
                             };
                             match S::parse(&val.to_ascii_lowercase()) {
                                 Some(s) => Expr::State(s),
                                 None => {
-                                    self.warnings
-                                        .push(format!("unknown state {val:?}; matching as text"));
+                                    self.warn_spanned(
+                                        format!("unknown state {val:?}; matching as text"),
+                                        self.prev_span(),
+                                    );
                                     text_or_empty(format!("is:{val}"))
                                 }
                             }
                         }
                         "sort" => {
                             let Some(val) = self.value_string() else {
-                                self.warnings.push("missing value for sort:".into());
+                                self.warn_spanned("missing value for sort:".into(), t_span);
                                 return text_or_empty("sort:".into());
                             };
                             let (key_str, desc) = if let Some(stripped) = val.strip_prefix('-') {
@@ -201,14 +246,14 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
                             } else {
                                 (val.clone(), false)
                             };
-                            self.sort_spec(key_str, desc)
+                            self.sort_spec(key_str, desc, self.prev_span())
                         }
                         "vl" => {
                             let Some(val) = self.value_string() else {
-                                self.warnings.push("missing value for vl:".into());
+                                self.warn_spanned("missing value for vl:".into(), t_span);
                                 return text_or_empty("vl:".into());
                             };
-                            self.resolve_vl(&val)
+                            self.resolve_vl(&val, self.prev_span())
                         }
                         _ => match F::parse(&lname) {
                             Some(field) => {
@@ -217,15 +262,17 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
                                     || ft == crate::ast::FieldType::Real
                                     || ft == crate::ast::FieldType::Date
                                 {
-                                    self.relational(field)
+                                    self.relational(field, t_span)
                                 } else {
-                                    self.text_match(field)
+                                    self.text_match(field, t_span)
                                 }
                             }
                             None => {
                                 let remainder = self.value_string().unwrap_or_default();
-                                self.warnings
-                                    .push(format!("unknown field {w_clone:?}; matching as text"));
+                                self.warn_spanned(
+                                    format!("unknown field {w_clone:?}; matching as text"),
+                                    t_span,
+                                );
                                 text_or_empty(format!("{w_clone}:{remainder}"))
                             }
                         },
@@ -250,21 +297,21 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
         }
     }
 
-    fn sort_spec(&mut self, key_str: String, descending: bool) -> Expr<F, S> {
+    fn sort_spec(&mut self, key_str: String, descending: bool, span: (usize, usize)) -> Expr<F, S> {
         match K::parse(&key_str.to_ascii_lowercase()) {
             Some(k) => {
                 self.sorts.push(SortSpec { key: k, descending });
                 Expr::Empty
             }
             None => {
-                self.warnings.push(format!("unknown sort key {key_str:?}"));
+                self.warn_spanned(format!("unknown sort key {key_str:?}"), span);
                 let pfx = if descending { "-" } else { "" };
                 text_or_empty(format!("sort:{pfx}{key_str}"))
             }
         }
     }
 
-    fn text_match(&mut self, field: F) -> Expr<F, S> {
+    fn text_match(&mut self, field: F, field_span: (usize, usize)) -> Expr<F, S> {
         match self.peek() {
             Some(Token::Eq) => {
                 self.pos += 1;
@@ -274,7 +321,7 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
                         kind: MatchKind::Exact(val),
                     },
                     None => {
-                        self.warnings.push(format!("missing value for {field}:="));
+                        self.warn_spanned(format!("missing value for {field}:="), field_span);
                         text_or_empty(format!("{field}:="))
                     }
                 }
@@ -287,7 +334,7 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
                         kind: MatchKind::Regex(val),
                     },
                     None => {
-                        self.warnings.push(format!("missing value for {field}:~"));
+                        self.warn_spanned(format!("missing value for {field}:~"), field_span);
                         text_or_empty(format!("{field}:~"))
                     }
                 }
@@ -300,7 +347,7 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
                         kind: MatchKind::Fuzzy(val),
                     },
                     None => {
-                        self.warnings.push(format!("missing value for {field}:?"));
+                        self.warn_spanned(format!("missing value for {field}:?"), field_span);
                         text_or_empty(format!("{field}:?"))
                     }
                 }
@@ -312,14 +359,19 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
                 let prefix = self.eat_comparator().map(|c| c.as_str()).unwrap_or("");
                 match self.value_string() {
                     Some(val) => {
-                        self.warnings.push(format!(
-                            "relational comparator on text field {field}; matching as text"
-                        ));
+                        self.warn_spanned(
+                            format!(
+                                "relational comparator on text field {field}; matching as text"
+                            ),
+                            field_span,
+                        );
                         text_or_empty(format!("{field}:{prefix}{val}"))
                     }
                     None => {
-                        self.warnings
-                            .push(format!("missing value for {field}:{prefix}"));
+                        self.warn_spanned(
+                            format!("missing value for {field}:{prefix}"),
+                            field_span,
+                        );
                         text_or_empty(format!("{field}:{prefix}"))
                     }
                 }
@@ -327,7 +379,7 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
             _ => {
                 let quoted = matches!(self.peek(), Some(Token::Quoted(_)));
                 let Some(val) = self.value_string() else {
-                    self.warnings.push(format!("missing value for {field}:"));
+                    self.warn_spanned(format!("missing value for {field}:"), field_span);
                     return text_or_empty(format!("{field}:"));
                 };
                 // A quoted value is literal text: `genre:"true"` is a substring
@@ -352,13 +404,12 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
         }
     }
 
-    fn relational(&mut self, field: F) -> Expr<F, S> {
+    fn relational(&mut self, field: F, field_span: (usize, usize)) -> Expr<F, S> {
         let comp = self.eat_comparator();
         let prefix = comp.map(|c| c.as_str()).unwrap_or("").to_string();
         let quoted = matches!(self.peek(), Some(Token::Quoted(_)));
         let Some(raw) = self.value_string() else {
-            self.warnings
-                .push(format!("missing value for {field}:{prefix}"));
+            self.warn_spanned(format!("missing value for {field}:{prefix}"), field_span);
             return text_or_empty(format!("{field}:{prefix}"));
         };
         // Handle :true/:false presence checks even on numeric/date fields (a
@@ -376,22 +427,28 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
             }
         }
         let Some(low) = parse_typed_value(field.clone(), &raw) else {
-            self.warnings
-                .push(format!("bad numeric/date value {raw:?}; matching as text"));
+            self.warn_spanned(
+                format!("bad numeric/date value {raw:?}; matching as text"),
+                self.prev_span(),
+            );
             return text_or_empty(format!("{field}:{prefix}{raw}"));
         };
         if comp.is_none() && matches!(self.peek(), Some(Token::DotDot)) {
             self.pos += 1;
             let Some(raw_hi) = self.value_string() else {
-                self.warnings
-                    .push(format!("missing value for {field}:{raw}.."));
+                self.warn_spanned(
+                    format!("missing value for {field}:{raw}.."),
+                    self.prev_span(),
+                );
                 return text_or_empty(format!("{field}:{raw}.."));
             };
             if let Some(high) = parse_typed_value(field.clone(), &raw_hi) {
                 return Expr::Range { field, low, high };
             }
-            self.warnings
-                .push(format!("bad range bound {raw_hi:?}; matching as text"));
+            self.warn_spanned(
+                format!("bad range bound {raw_hi:?}; matching as text"),
+                self.prev_span(),
+            );
             return text_or_empty(format!("{field}:{raw}..{raw_hi}"));
         }
         Expr::Compare {
@@ -426,25 +483,24 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
         }
     }
 
-    fn resolve_vl(&mut self, name: &str) -> Expr<F, S> {
+    fn resolve_vl(&mut self, name: &str, span: (usize, usize)) -> Expr<F, S> {
         let key = name.to_ascii_lowercase();
         let Some(resolver) = self.resolver else {
             return text_or_empty(format!("vl:{name}"));
         };
         if self.seen.iter().any(|s| s == &key) {
-            self.warnings
-                .push(format!("perspective cycle at {name:?}; ignored"));
+            self.warn_spanned(format!("perspective cycle at {name:?}; ignored"), span);
             return Expr::Empty;
         }
         let Some(text) = resolver.expression(name) else {
-            self.warnings
-                .push(format!("unknown perspective {name:?}; ignored"));
+            self.warn_spanned(format!("unknown perspective {name:?}; ignored"), span);
             return Expr::Empty;
         };
         let mut seen = self.seen.clone();
         seen.push(key);
         let sub = parse_inner(&text, self.resolver, &seen);
         self.warnings.extend(sub.warnings);
+        self.diagnostics.extend(sub.diagnostics);
         self.sorts.extend(sub.sorts);
         sub.expr
     }

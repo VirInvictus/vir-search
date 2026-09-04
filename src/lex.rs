@@ -22,88 +22,132 @@ pub enum Token {
     DotDot, // .. (range)
 }
 
-/// Characters that always terminate a bareword.
+/// A token with its byte span in the source (`start..end`, end exclusive), so
+/// consumers can underline the exact broken fragment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Spanned {
+    pub token: Token,
+    pub start: usize,
+    pub end: usize,
+}
+
+/// Characters that always terminate a bareword. Kept in sync with the quoting
+/// check in `ast::quote_if_needed` or round-tripping breaks.
 fn is_boundary(c: char) -> bool {
     c.is_whitespace() || matches!(c, '(' | ')' | ':' | '"' | '~' | '?' | '!' | '<' | '>' | '=')
 }
 
 pub fn lex(input: &str) -> Vec<Token> {
+    lex_with_spans(input).into_iter().map(|s| s.token).collect()
+}
+
+/// Tokenize, keeping each token's byte span.
+pub fn lex_with_spans(input: &str) -> Vec<Spanned> {
+    let indexed: Vec<(usize, char)> = input.char_indices().collect();
+    let len = input.len();
+    // Byte offset of the token after index `to`: the next token's start, or
+    // the input end.
+    let end_of = |to: usize| indexed.get(to).map_or(len, |(b, _)| *b);
+
     let mut tokens = Vec::new();
-    let chars: Vec<char> = input.chars().collect();
     let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
+    while i < indexed.len() {
+        let (start, c) = indexed[i];
+        let push = |token: Token, next: usize, tokens: &mut Vec<Spanned>| {
+            tokens.push(Spanned {
+                token,
+                start,
+                end: end_of(next),
+            });
+        };
         match c {
-            c if c.is_whitespace() => i += 1,
+            c if c.is_whitespace() => {
+                i += 1;
+                continue;
+            }
             '(' => {
-                tokens.push(Token::LParen);
+                push(Token::LParen, i + 1, &mut tokens);
                 i += 1;
             }
             ')' => {
-                tokens.push(Token::RParen);
+                push(Token::RParen, i + 1, &mut tokens);
                 i += 1;
             }
             ':' => {
-                tokens.push(Token::Colon);
+                push(Token::Colon, i + 1, &mut tokens);
                 i += 1;
             }
             '~' => {
-                tokens.push(Token::Tilde);
+                push(Token::Tilde, i + 1, &mut tokens);
                 i += 1;
             }
             '?' => {
-                tokens.push(Token::Quest);
+                push(Token::Quest, i + 1, &mut tokens);
                 i += 1;
             }
             '=' => {
-                tokens.push(Token::Eq);
+                push(Token::Eq, i + 1, &mut tokens);
                 i += 1;
             }
             '>' => {
-                tokens.push(two(&chars, &mut i, '=', Token::Ge, Token::Gt));
+                let (t, next) = two(&indexed, i, '=', Token::Ge, Token::Gt);
+                push(t, next, &mut tokens);
+                i = next;
             }
             '<' => {
-                tokens.push(two(&chars, &mut i, '=', Token::Le, Token::Lt));
+                let (t, next) = two(&indexed, i, '=', Token::Le, Token::Lt);
+                push(t, next, &mut tokens);
+                i = next;
             }
             '!' => {
-                tokens.push(two(&chars, &mut i, '=', Token::Ne, Token::Bang));
+                let (t, next) = two(&indexed, i, '=', Token::Ne, Token::Bang);
+                push(t, next, &mut tokens);
+                i = next;
             }
             '"' => {
-                tokens.push(Token::Quoted(scan_quoted(&chars, &mut i)));
+                let (s, next) = scan_quoted(&indexed, &mut i);
+                push(Token::Quoted(s), next, &mut tokens);
+                i = next;
             }
-            '.' if chars.get(i + 1) == Some(&'.') => {
-                tokens.push(Token::DotDot);
+            '.' if indexed.get(i + 1).map(|(_, c2)| *c2) == Some('.') => {
+                push(Token::DotDot, i + 2, &mut tokens);
                 i += 2;
             }
             _ => {
-                tokens.push(Token::Word(scan_word(&chars, &mut i)));
+                let (w, next) = scan_word(&indexed, &mut i);
+                push(Token::Word(w), next, &mut tokens);
+                i = next;
             }
         }
     }
     tokens
 }
 
-/// Consume `c`; if the next char is `second`, consume it and emit `both`, else
-/// emit `single`.
-fn two(chars: &[char], i: &mut usize, second: char, both: Token, single: Token) -> Token {
-    *i += 1;
-    if chars.get(*i) == Some(&second) {
-        *i += 1;
-        both
+/// Consume the char at `i`; if the next char is `second`, consume it too and
+/// emit `both`, else emit `single`. Returns the token and the next index.
+fn two(
+    indexed: &[(usize, char)],
+    i: usize,
+    second: char,
+    both: Token,
+    single: Token,
+) -> (Token, usize) {
+    if indexed.get(i + 1).map(|(_, c)| *c) == Some(second) {
+        (both, i + 2)
     } else {
-        single
+        (single, i + 1)
     }
 }
 
 /// Scan a `"..."` string (supports `\"` and `\\`). An unterminated quote runs
-/// to EOF.
-fn scan_quoted(chars: &[char], i: &mut usize) -> String {
+/// to EOF. Returns the string and the next index.
+fn scan_quoted(indexed: &[(usize, char)], i: &mut usize) -> (String, usize) {
     *i += 1; // opening quote
     let mut out = String::new();
-    while *i < chars.len() {
-        let c = chars[*i];
+    while *i < indexed.len() {
+        let c = indexed[*i].1;
         if c == '\\' {
-            match chars.get(*i + 1) {
+            match indexed.get(*i + 1).map(|(_, c2)| *c2) {
                 Some('"') => {
                     out.push('"');
                     *i += 2;
@@ -125,25 +169,26 @@ fn scan_quoted(chars: &[char], i: &mut usize) -> String {
             *i += 1;
         }
     }
-    out
+    (out, *i)
 }
 
 /// Scan a bareword. Stops at a boundary char or a `..` (range), keeping a lone
 /// `.` inside the word (so `1998..2004` splits but `Mr. X` keeps the dot).
-fn scan_word(chars: &[char], i: &mut usize) -> String {
+/// Returns the word and the next index.
+fn scan_word(indexed: &[(usize, char)], i: &mut usize) -> (String, usize) {
     let mut out = String::new();
-    while *i < chars.len() {
-        let c = chars[*i];
+    while *i < indexed.len() {
+        let c = indexed[*i].1;
         if is_boundary(c) {
             break;
         }
-        if c == '.' && chars.get(*i + 1) == Some(&'.') {
+        if c == '.' && indexed.get(*i + 1).map(|(_, c2)| *c2) == Some('.') {
             break;
         }
         out.push(c);
         *i += 1;
     }
-    out
+    (out, *i)
 }
 
 #[cfg(test)]
@@ -202,5 +247,27 @@ mod tests {
     #[test]
     fn unterminated_quote_runs_to_eof() {
         assert_eq!(lex("\"no end"), vec![Token::Quoted("no end".into())]);
+    }
+
+    #[test]
+    fn spans_are_byte_offsets() {
+        let spans = lex_with_spans("artist:Aphex");
+        assert_eq!((spans[0].start, spans[0].end), (0, 6));
+        assert_eq!((spans[1].start, spans[1].end), (6, 7));
+        assert_eq!((spans[2].start, spans[2].end), (7, 12));
+    }
+
+    #[test]
+    fn spans_cover_unicode_barewords() {
+        // Björk's ö is two bytes: byte spans, not char counts.
+        let spans = lex_with_spans("Björk x");
+        assert_eq!((spans[0].start, spans[0].end), (0, 6));
+        assert_eq!((spans[1].start, spans[1].end), (7, 8));
+    }
+
+    #[test]
+    fn quoted_span_includes_the_quotes() {
+        let spans = lex_with_spans("t:\"a b\"");
+        assert_eq!((spans[2].start, spans[2].end), (2, 7));
     }
 }

@@ -9,7 +9,7 @@
 ## Phase 2: Engine Expansion & Downstream Optimization
 *Context: Enhancing diagnostic feedback, AST manipulation, and optimizing downstream app evaluations (Atrium, Conservatory, Viaduct).*
 
-- [ ] **Diagnostic Source Spans:** Add byte offsets (`Span`) to `lex.rs` and `parse.rs` so GTK4 search bars in Atrium/Conservatory can draw red squiggly underlines on typos.
+- [x] **Diagnostic Source Spans:** Add byte offsets (`Span`) to `lex.rs` and `parse.rs` so GTK4 search bars in Atrium/Conservatory can draw red squiggly underlines on typos. *(Shipped 1.2.0: `lex_with_spans()` keeps byte spans per token and `ParseResult.diagnostics` pairs every degradation warning with the span to underline; `lex()`/`warnings` unchanged, purely additive.)*
 - [ ] **Hashable AST & LRU Query Cache:** Make `Expr` hashable and add `QueryCache<F, S, K>` to memoize parsing and SQL translation for rapid search-as-you-type in all apps.
 - [x] **Centralized Fuzzy Matching:** Move Damerau-Levenshtein and `fuzzy_threshold` logic into `vir_search::fuzzy` so Atrium and Conservatory can drop 130+ lines of duplicate code. *(Shipped 1.1.0: `damerau_levenshtein` + `within` (Atrium's early-exit form) + `threshold` + `hit` (fold-aware, whole-or-word). Consumer adoption rides the consumer wave: Conservatory is a straight swap; Atrium's copy gains accent folding as a deliberate improvement.)*
 - [ ] **Relative Date Grammar Expansion:** Add `in3days`, `lastmonth`, `nextmonth`, `+7d` offset parsing. (Impacts: Atrium forward-looking tasks, Conservatory audio timelines).

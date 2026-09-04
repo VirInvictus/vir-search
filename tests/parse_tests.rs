@@ -3,7 +3,7 @@ use vir_search::ast::{
     Comparator, DateSpec, Expr, FieldType, MatchKind, ParseField, ParseSort, ParseState, SortSpec,
     Value,
 };
-use vir_search::parse::{PerspectiveResolver, parse, parse_with_resolver};
+use vir_search::parse::{Diagnostic, PerspectiveResolver, parse, parse_with_resolver};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TestField {
@@ -335,6 +335,40 @@ fn empty_input_is_empty() {
         parse::<TestField, TestState, TestSort>("   ").expr,
         Expr::Empty
     );
+}
+
+#[test]
+fn diagnostics_carry_byte_spans() {
+    // The underline lands on the unknown field word, byte-accurate.
+    let p = parse::<TestField, TestState, TestSort>("foo bogus:value");
+    let d: &Diagnostic = &p.diagnostics[0];
+    assert_eq!((d.start, d.end), (4, 9));
+    assert!(d.message.contains("unknown field"));
+    // Every diagnostic also appears in the flat warning log.
+    assert!(p.warnings.iter().any(|w| w.contains("unknown field")));
+}
+
+#[test]
+fn missing_value_diagnostics_point_at_the_field() {
+    let p = parse::<TestField, TestState, TestSort>("genre:");
+    assert_eq!((p.diagnostics[0].start, p.diagnostics[0].end), (0, 5));
+}
+
+#[test]
+fn unclosed_paren_diagnostic_runs_to_the_end() {
+    let p = parse::<TestField, TestState, TestSort>("(genre:ambient");
+    let d = p
+        .diagnostics
+        .iter()
+        .find(|d| d.message.contains("unclosed"))
+        .expect("unclosed-paren diagnostic");
+    assert_eq!((d.start, d.end), (0, 14));
+}
+
+#[test]
+fn clean_parse_has_no_diagnostics() {
+    let p = parse::<TestField, TestState, TestSort>("genre:ambient AND rating:>=4 sort:-added");
+    assert!(p.diagnostics.is_empty());
 }
 
 struct Perspectives(HashMap<String, String>);
