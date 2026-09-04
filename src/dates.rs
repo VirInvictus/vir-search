@@ -1,7 +1,7 @@
-//! Date resolution shared by `eval` and `sql_translate` so the two paths never
-//! diverge on date arithmetic (the `atrium-search` pattern). A [`DateSpec`]
-//! resolves to a `[start, end)` epoch-seconds (UTC) range; a comparator turns
-//! that range into a match.
+//! Date resolution. A [`DateSpec`] resolves to a `[start, end)` epoch-seconds
+//! (UTC) range; a comparator turns that range into a match. Consumers translate
+//! the resolved range into their own SQL or eval-side comparisons; this crate
+//! deliberately ships no query translation.
 
 use chrono::{Datelike, Days, NaiveDate, NaiveTime, Utc};
 

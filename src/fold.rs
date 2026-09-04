@@ -1,15 +1,15 @@
-//! Accent-folding for search matching (Phase 18a).
+//! Accent-folding for search matching.
 //!
 //! `fold` removes diacritics and lowercases, so `Björk` and `bjork` match. It
 //! mirrors SQLite FTS5's `unicode61 remove_diacritics 2` on the in-memory eval
 //! side, which keeps the all-or-nothing dual path consistent: bare text folds on
 //! the SQL path (the FTS tokenizer) and here (this function).
 //!
-//! This is deliberately narrower than `conservatory-core`'s dedup `norm_key`,
-//! which also folds quote/dash punctuation and collapses whitespace: search
-//! folding only strips diacritics and lowercases, so it never changes token
-//! boundaries. Applied only to the *forgiving* match kinds (substring, quoted
-//! substring, fuzzy); `=exact` and `~regex` stay literal.
+//! This is deliberately narrower than a dedup normalizer: those also fold
+//! quote/dash punctuation and collapse whitespace, while search folding only
+//! strips diacritics and lowercases, so it never changes token boundaries.
+//! Applied only to the *forgiving* match kinds (substring, quoted substring,
+//! fuzzy); `=exact` and `~regex` stay literal.
 
 use unicode_normalization::UnicodeNormalization;
 
