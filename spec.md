@@ -1,8 +1,8 @@
 # vir-search Specification
 
 **Domain**: Expression parsing and AST generation.
-**Language**: Rust (edition 2021).
-**Dependencies**: `chrono`.
+**Language**: Rust (edition 2024).
+**Dependencies**: `chrono`, `regex`, `unicode-normalization`.
 
 ## 1. Scope and Architecture
 
@@ -30,11 +30,16 @@ Consumers must implement:
 
 ## 3. Fallback and Degradation Policies
 
-The parser enforces a strict "never fail" policy.
+The parser enforces a strict "never fail" policy, structurally: there is no
+error channel in the parse path, so a partial query can never take the whole
+query down with it.
 - If a token resembles a field syntax (`unknown:value`) but the domain's `ParseField` implementation returns `None`, the parser emits a warning in the `ParseResult` and degrades the node to `Expr::Text("unknown:value")`.
-- Unbalanced parentheses, trailing logical operators, and malformed numeric values all degrade safely into text matches rather than terminating execution.
-- The lexer handles quotes and unicode safely without panicking.
+- A trailing logical operator (`foo AND`), a missing value (`genre:`, `title:=`), or EOF mid-expression degrades locally: what already parsed stands, the broken fragment becomes a visible text node carrying the partial expression, and a warning is recorded.
+- Unbalanced parentheses keep the successfully parsed content and record a warning, rather than flattening the input into one text node.
+- Standalone punctuation degrades to a text node of its literal form (`?`, `!=`, `..`); a stray `)` reads as nothing.
+- A quoted value is literal text: `genre:"true"` is a substring match, never the boolean presence check that the unquoted `genre:true` means. A relational comparator on a text field (`author:>=Sanderson`) degrades to its visible text form rather than dropping the query.
+- The lexer handles quotes, backslash escapes (`\"`, `\\`), and unicode safely without panicking; `Display` escapes backslashes before quotes so rendering round-trips.
 
 ## 4. Relevance Ranking
 
-The library provides `blend_relevance`, a mathematical heuristic combining a `bm25` Full-Text Search score with an exponential recency decay. It also provides `collect_text_terms`, which traverses the generic AST to harvest bare-text components. Consumers use these extracted strings to supply their underlying SQLite FTS queries while bypassing the strictly fielded constraints.
+The library provides `blend_relevance`, a mathematical heuristic combining a `bm25` Full-Text Search score with an exponential recency decay. It also provides `collect_text_terms`, which traverses the generic AST to harvest bare-text components, skipping negated subtrees (`NOT x` is not a positive term). Consumers use these extracted strings to supply their underlying SQLite FTS queries while bypassing the strictly fielded constraints.

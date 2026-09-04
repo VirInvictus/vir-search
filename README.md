@@ -16,10 +16,13 @@ The core parser uses recursive descent to produce an AST. It is designed around 
 
 The library understands a deep, Calibre-compatible grammar:
 - **Field Matches**: `author:sanderson` (substring), `author:=Brandon` (exact), `title:~regex` (regex), `title:?fuzzy` (fuzzy).
-- **Relational Constraints**: `rating:>=4`, `duration:>600`.
-- **Date Arithmetic**: `added:thisweek`, `year:2020..2023`, `added:3daysago`. Date arithmetic is dynamically resolved against the current epoch during parsing using `chrono`.
+- **Relational Constraints**: `rating:>=4`, `duration:>600`. A relational comparator on a text field (`author:>=Sanderson`) degrades to a visible text match rather than dropping the query.
+- **Date Arithmetic**: `added:thisweek`, `added:tomorrow`, `added:lastweek`, `added:nextweek`, `year:2020..2023`, `added:3daysago`. Date arithmetic is dynamically resolved against the current epoch during parsing using `chrono`.
 - **States**: `is:finished`, `is:starred`.
-- **Logic**: Parentheses, `AND`, `OR`, `NOT`.
+- **Sorts and Perspectives**: `sort:-added` extracts a sort directive; `vl:name` expands a named perspective through a resolver you provide.
+- **Logic**: Parentheses, `AND`, `OR`, `NOT` (including doubled negation).
+
+Degradation is local and visible: a quoted value is always literal text (`genre:"true"` is a substring match, not the `genre:true` presence check), a trailing operator or missing value keeps what already parsed, and every degraded fragment records a warning in `ParseResult.warnings`.
 
 ## Usage
 
