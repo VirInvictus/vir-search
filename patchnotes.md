@@ -1,5 +1,31 @@
 # vir-search Patch Notes
 
+## v1.1.0 (2026-09-04)
+
+**Phase 2: centralized fuzzy matching.** New `vir_search::fuzzy` module:
+
+*   `damerau_levenshtein(a, b)` — optimal string alignment, the exact
+    distance (transpositions count as one edit: "wrok" ↔ "work").
+*   `within(a, b, max)` — the bounded predicate with a length-difference
+    short-circuit and an early exit once a row's running minimum exceeds
+    `max`; same answer as the exact comparison, cheaper on non-matches.
+    Property-checked against the exact distance over a sample grid in both
+    directions.
+*   `threshold(needle_len)` — the length-aware bands both consumers
+    shipped (1-4 chars → 1 edit, 5-7 → 2, longer → 3).
+*   `hit(candidate, needle)` — accent-folded fuzzy hit: the needle within
+    threshold of the whole candidate or any of its whitespace-separated
+    words.
+
+Behavior notes for consumers adopting it: Atrium's copy gains accent
+folding (its `levenshtein_within` expected pre-lowercased input but did
+not fold — `?bjork` now matches `Björk`, the documented forgiving-kind
+rule); Conservatory's copy is a straight replacement (same threshold
+bands, same fold, same word split). Consumer adoption lands with the
+consumer wave, not this release.
+
+Suite: 34 green (15 unit + 16 parse + 3 rank).
+
 ## v1.0.4 (2026-09-04)
 
 **Phase 3 robustness: the parse path has no error channel any more.** The

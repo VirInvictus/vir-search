@@ -40,6 +40,8 @@ query down with it.
 - A quoted value is literal text: `genre:"true"` is a substring match, never the boolean presence check that the unquoted `genre:true` means. A relational comparator on a text field (`author:>=Sanderson`) degrades to its visible text form rather than dropping the query.
 - The lexer handles quotes, backslash escapes (`\"`, `\\`), and unicode safely without panicking; `Display` escapes backslashes before quotes so rendering round-trips.
 
-## 4. Relevance Ranking
+## 4. Relevance Ranking and Fuzzy Matching
 
 The library provides `blend_relevance`, a mathematical heuristic combining a `bm25` Full-Text Search score with an exponential recency decay. It also provides `collect_text_terms`, which traverses the generic AST to harvest bare-text components, skipping negated subtrees (`NOT x` is not a positive term). Consumers use these extracted strings to supply their underlying SQLite FTS queries while bypassing the strictly fielded constraints.
+
+The `fuzzy` module centralizes the shared fuzzy matcher: `damerau_levenshtein` (optimal string alignment), `within` (the bounded, early-exiting predicate), `threshold` (length-aware bands: 1-4 characters tolerate one edit, 5-7 two, longer three), and `hit` (accent-folded, whole-candidate-or-any-word). It ships no evaluation; consumers call it from their own field matching.

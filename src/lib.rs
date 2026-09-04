@@ -1,6 +1,7 @@
 pub mod ast;
 pub mod dates;
 pub mod fold;
+pub mod fuzzy;
 pub mod lex;
 pub mod parse;
 pub mod rank;
