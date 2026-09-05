@@ -1,7 +1,8 @@
 # vir-search
 
-**Stack:** Rust, `chrono`.
+**Stack:** Rust (edition 2021), `chrono`.
 **Status:** Maintained. Standalone library.
+**Versioning deviation:** there is no `VERSION` file; `Cargo.toml` is the single version source (a `VERSION` file would be a second carrier Cargo cannot consume). Every bump still gets a patchnotes entry and an annotated tag at the release commit.
 
 ## What is this?
 A domain-agnostic Rust library for parsing Calibre-style search expressions into a typed AST. Extracted from the `vir-gtk` ecosystem (Atrium, Conservatory) to eliminate parser duplication and provide a unified query language across the desktop suite.

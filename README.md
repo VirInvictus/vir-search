@@ -16,8 +16,10 @@ The core parser uses recursive descent to produce an AST. It is designed around 
 
 The library understands a deep, Calibre-compatible grammar:
 - **Field Matches**: `author:sanderson` (substring), `author:=Brandon` (exact), `title:~regex` (regex), `title:?fuzzy` (fuzzy, via the shared `fuzzy` module: Damerau-Levenshtein with a length-aware threshold, accent-folded).
+- **Wildcards and In-Lists** (1.3.0): `title:foo*` / `author:*bar` (prefix and suffix match), `(author:(a,b,c))`-style `In` lists as an OR over the members.
 - **Relational Constraints**: `rating:>=4`, `duration:>600`. A relational comparator on a text field (`author:>=Sanderson`) degrades to a visible text match rather than dropping the query.
-- **Date Arithmetic**: `added:thisweek`, `added:tomorrow`, `added:lastweek`, `added:nextweek`, `year:2020..2023`, `added:3daysago`. Date arithmetic is dynamically resolved against the current epoch during parsing using `chrono`.
+- **Date Arithmetic**: `added:thisweek`, `added:tomorrow`, `added:lastweek`, `added:nextweek`, `year:2020..2023`, `added:3daysago`, plus the 1.3.0 relative forms (`in7days`, `lastmonth`, `nextmonth`, `+7d` / `-14d`). Date arithmetic is dynamically resolved against the current epoch during parsing using `chrono`.
+- **Durations and Magnitudes** (1.3.0): human duration chains (`1h30m`, `3d`) for duration fields and size suffixes (`320k`, `50mb`) for numeric fields, so `size:<50mb` parses the way it reads.
 - **States**: `is:finished`, `is:starred`.
 - **Sorts and Perspectives**: `sort:-added` extracts a sort directive; `vl:name` expands a named perspective through a resolver you provide.
 - **Logic**: Parentheses, `AND`, `OR`, `NOT` (including doubled negation).
