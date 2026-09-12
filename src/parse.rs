@@ -599,6 +599,8 @@ fn parse_date_spec(raw: &str) -> Option<DateSpec> {
         "lastweek" => return Some(DateSpec::LastWeek),
         "nextweek" => return Some(DateSpec::NextWeek),
         "thismonth" => return Some(DateSpec::ThisMonth),
+        "lastmonth" => return Some(DateSpec::LastMonth),
+        "nextmonth" => return Some(DateSpec::NextMonth),
         "thisyear" => return Some(DateSpec::ThisYear),
         _ => {}
     }

@@ -218,6 +218,27 @@ fn date_keywords_parse() {
 }
 
 #[test]
+fn month_keywords_parse() {
+    for (kw, spec) in [
+        ("lastmonth", DateSpec::LastMonth),
+        ("nextmonth", DateSpec::NextMonth),
+    ] {
+        let p = parse::<TestField, TestState, TestSort>(&format!("added:{kw}"));
+        assert_eq!(
+            p.expr,
+            Expr::Compare {
+                field: TestField::Added,
+                comp: Comparator::Eq,
+                value: Value::Date(spec),
+            },
+            "month keyword {kw} did not parse"
+        );
+        // A clean parse: the keyword is resolved, not degraded with a warning.
+        assert!(p.warnings.is_empty(), "{kw} should not warn");
+    }
+}
+
+#[test]
 fn double_negation_negates_twice() {
     let p = parse::<TestField, TestState, TestSort>("NOT NOT is:starred");
     assert_eq!(
