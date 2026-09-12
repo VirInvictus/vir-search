@@ -33,3 +33,45 @@
 - [x] **Negated FTS Terms:** Prevent `collect_text_terms` from extracting negated terms (`NOT ambient`) for positive SQLite FTS lookups. *(Shipped 1.0.4: `Not` subtrees are skipped.)*
 - [x] **Repeated Term Dedup:** `collect_text_terms` keeps duplicates, so `ambient ambient` harvests the term twice. *(Recorded as intentional 2026-09-11, decided: repeated terms weighting rank higher is classic term-frequency behavior; dedup would silently change consumer ranking, so it stays until a consumer asks.)*
 - [x] **Docs Sync:** Correct `Cargo.toml` edition vs `spec.md`, update dependencies list, and clean up stale upstream comments in `dates.rs` and `fold.rs`. *(Shipped 1.0.4: spec says edition 2024 + full dep list; the phantom spec §3.4 references in `lex.rs`/`ast.rs` headers and the `eval`/`sql_translate`/`Phase 18a`/`norm_key` comments are gone; README grammar list names `sort:`/`vl:` and the new date keywords; MIT LICENSE file added — the crate declared MIT but shipped no text.)*
+
+## New findings 2026-09-12 (six-lens full audit; detail: audit/FULL-AUDIT-2026-09-12.md, Wave 11)
+
+- [ ] **HIGH: unbounded recursion.** "("*50000 overflows the stack in
+      predicate/boolean_expr (an abort, not a panic - violating the
+      never-fail contract), and "!"*100000 parses into a Not chain whose
+      Drop/Display/visit overflow later. Add a parser depth cap that
+      degrades the fragment to text (spanned warning), and bound negation
+      wrapping the same way; thread the depth through resolve_vl.
+- [ ] **MEDIUM: chrono Days operators panic on out-of-range offsets**
+      (dates.rs week/DaysAgo/InDays arms): added:4294967295daysago parses
+      cleanly and aborts at resolve. Use checked_add/sub_days with
+      saturating fallback (the next_day/prev_day pattern already in file).
+- [ ] **MEDIUM: a stray ) silently discards the rest of the query**
+      (boolean_term breaks at RParen and the remainder is dropped without
+      a warning - contradicting spec 3). Consume it, warn_spanned, and
+      keep collecting.
+- [ ] **Docs/API:** README's "resolved during parsing using chrono" is
+      false (symbolic DateSpec; consumer-invoked resolve_range); no
+      crate-level rustdoc or missing_docs; parse/Expr/DateSpec/MatchKind/
+      rank.rs undocumented while the 1.4.x additions are; no normative
+      grammar table exists anywhere (add one to README or a spec
+      appendix); clippy missing from CLAUDE.md commands.
+- [ ] **Consumer-doc drift found by the cross-repo lens (their lanes):**
+      Atrium's spec documents Ndaysout and a quoted-exact form that do
+      not exist; Conservatory's keyword list is missing seven families
+      and its spec example teaches "is:finished false"; Conservatory's
+      roadmap misattributes SQL translation to vir-search ("lives in
+      vir-search's sql_translate" - no such module exists). Fix on the
+      consumer side; the attribution error matters before any push-down
+      work is routed.
+- [ ] **Blitz candidates:** fuzz/property target pinning never-fail +
+      Display round-trip (the 1.4.1 Display bug class recurred and the
+      existing harness cannot catch it); diagnostic ergonomics (severity,
+      suggestions, line/col - the spans shipped so search bars could draw
+      squiggles and no consumer consumes them); the SQL push-down scaffold
+      (MatchKind shapes + walker in-library after the boundary record is
+      fixed; per-schema fragments stay consumer-side); QueryCache hit-path
+      tuning only once a consumer adopts it.
+- [ ] **GitHub presentation (workspace batch):** description empty,
+      topics null, zero Releases, Cargo.toml lacks keywords/categories -
+      proposals drafted in the ledger.
