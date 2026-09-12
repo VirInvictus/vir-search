@@ -1,5 +1,42 @@
 # vir-search Patch Notes
 
+## v1.4.1 (2026-09-12)
+
+**Bugfix + the decided hashable-AST design.** The month-keyword parse gap
+closes, and the AST learns to cross cache boundaries safely.
+
+*   **`added:lastmonth` and `added:nextmonth` parse.** 1.3.0 shipped the
+    `DateSpec::LastMonth`/`NextMonth` variants with resolution and Display
+    forms but never taught `parse_date_spec` the keyword arms, so both
+    degraded to text nodes while Display emitted exactly the strings that
+    failed to re-parse. Semantic tests pin both keywords with warn-free
+    parses (the shape-stable round-trip harness could not see this one).
+*   **Hashable AST, with `Value::Real` dropped from hashability** (decided
+    2026-09-11). `Expr`, `MatchKind`, `Comparator`, `DateSpec`, `SortSpec`,
+    and `Value` implement `Eq`/`Hash`; `Value::Real`'s payload never enters
+    a hash (the variant hashes as a bare discriminant), so there are no f64
+    bit-pattern, `-0.0`, or NaN hazards. `Expr::contains_real()` recognizes
+    real-carrying queries; caches keyed on `Expr` skip them instead of
+    hashing them.
+*   **`QueryCache<F, S, K>`** (new `cache` module): a dependency-free LRU
+    memoizing `parse` keyed by the raw query string, for search-as-you-type.
+    Real-carrying queries bypass it in both directions (never written,
+    hence never served). SQL-translation memoization stays consumer-side,
+    keyed on the now-hashable tree. `ParseResult` gained `Clone` (additive)
+    to be cacheable.
+*   **Recorded dispositions** (both decided 2026-09-11): the Viaduct
+    integration blueprint is waived for now (revisit on an expressed
+    Viaduct need), and `collect_text_terms` keeping repeated terms is
+    intentional (classic term-frequency weighting).
+*   **Docs sync:** the crate guidance header states the real stack (edition
+    2024, rust-version 1.85, regex + chrono + unicode-normalization); the
+    stale "for the binary" comment in `dates.rs` is rewritten; the spec
+    gains the `vl:`/`PerspectiveResolver` semantics and the hashing/cache
+    contract; the README documents `QueryCache`.
+
+Suite: 58 green (19 unit + 28 parse + 3 rank + 8 cache), clippy
+`-D warnings` clean, `cargo fmt --check` clean.
+
 ## v1.4.0 (2026-09-04)
 
 **Phase 2: AST inspector traits.** `Visitor` (read-only, parents before
