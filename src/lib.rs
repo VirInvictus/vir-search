@@ -1,4 +1,5 @@
 pub mod ast;
+pub mod cache;
 pub mod dates;
 pub mod fold;
 pub mod fuzzy;
@@ -10,6 +11,7 @@ pub use ast::{
     Comparator, DateSpec, Expr, FieldType, Folder, MatchKind, ParseField, ParseSort, ParseState,
     SortSpec, Value, Visitor,
 };
+pub use cache::QueryCache;
 pub use fold::fold;
 pub use parse::{Diagnostic, ParseResult, PerspectiveResolver, parse, parse_with_resolver};
 pub use rank::{blend_relevance, collect_text_terms};

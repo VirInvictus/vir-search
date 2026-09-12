@@ -63,6 +63,16 @@ let result = parse::<MyField, MyState, MySort>("author:sanderson rating:>=4");
 println!("Parsed expression: {}", result.expr);
 ```
 
+### Search-as-you-type: `QueryCache`
+
+For rapid repeated parsing, `QueryCache::new(capacity)` memoizes parses keyed
+by the raw query string, LRU-bounded. Queries containing a real-number literal
+(`rating:>=4.5`, `duration:>90m`) bypass the cache by design: `Value::Real` is
+deliberately excluded from hashing, so such queries are recognized with
+`Expr::contains_real()` and skipped rather than hashed. The parsed `Expr`
+itself implements `Eq` + `Hash`, so consumer-side caches (for example over SQL
+translation) can key on the tree, applying the same skip.
+
 ## Support
 
 If vir-search's useful to you and you'd like to chip in:

@@ -23,7 +23,7 @@ pub trait ParseSort: Clone + std::fmt::Display + PartialEq {
     fn parse(name: &str) -> Option<Self>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MatchKind {
     Substring(String),
     Exact(String),
@@ -39,7 +39,7 @@ pub enum MatchKind {
     HasNone,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Comparator {
     Eq,
     Ne,
@@ -62,7 +62,7 @@ impl Comparator {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DateSpec {
     Today,
     Yesterday,
@@ -104,9 +104,31 @@ impl fmt::Display for DateSpec {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Int(i64),
+    /// A real-number literal (`rating:>=4.5`, `duration:>90m`). Deliberately
+    /// excluded from hashing (decided 2026-09-11): its payload never enters a
+    /// [`Hash`] impl, so queries carrying a real literal must be recognized
+    /// with [`Expr::contains_real`] and skipped by caches instead of hashed.
+    /// There is no f64 bit-pattern story to get wrong.
     Real(f64),
     Date(DateSpec),
     Text(String),
+}
+
+impl Eq for Value {}
+
+impl std::hash::Hash for Value {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            Value::Int(n) => n.hash(state),
+            // The payload stays out (see the variant's docs): only the
+            // discriminant reaches the hasher. Equal values still hash equal,
+            // so the Hash/Eq contract holds; distinct reals simply collide.
+            Value::Real(_) => {}
+            Value::Date(d) => d.hash(state),
+            Value::Text(s) => s.hash(state),
+        }
+    }
 }
 
 impl fmt::Display for Value {
@@ -120,13 +142,13 @@ impl fmt::Display for Value {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SortSpec<K> {
     pub key: K,
     pub descending: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub enum Expr<F, S> {
     Empty,
     Text(String),
@@ -150,6 +172,16 @@ pub enum Expr<F, S> {
     Or(Vec<Expr<F, S>>),
 }
 
+/// Marker companions to the derived [`PartialEq`]. The derived [`Hash`] adds
+/// `Hash` bounds on the consumer's `F`/`S` (plain derived enums have them),
+/// while this `Eq` adds none; [`Value::Real`] is the one payload excluded
+/// from hashing, so a cache keyed on `Expr` must skip queries where
+/// [`Expr::contains_real`] is true rather than hash them. (`Eq` is bit
+/// equality via `PartialEq`; a `nan` literal, reachable as `duration:nan`,
+/// is never equal to itself, which is one more reason real-carrying queries
+/// do not belong in a hash-keyed cache.)
+impl<F: ParseField, S: ParseState> Eq for Expr<F, S> {}
+
 /// Read-only AST inspection. `enter` is called for every node, parents before
 /// children; returning `false` skips that node's children. Implement only the
 /// hooks you need — the node itself carries everything, so `enter` alone is
@@ -170,6 +202,23 @@ pub trait Folder<F, S> {
 }
 
 impl<F: ParseField, S: ParseState> Expr<F, S> {
+    /// Does the tree carry any [`Value::Real`] literal? Caches keyed on
+    /// `Expr` call this before hashing: real payloads are excluded from
+    /// hashing by design, so a real-carrying query must skip the cache
+    /// instead of entering it (the crate's own
+    /// [`QueryCache`](crate::cache::QueryCache) does exactly that).
+    pub fn contains_real(&self) -> bool {
+        match self {
+            Expr::Compare { value, .. } => matches!(value, Value::Real(_)),
+            Expr::Range { low, high, .. } => {
+                matches!(low, Value::Real(_)) || matches!(high, Value::Real(_))
+            }
+            Expr::Not(inner) => inner.contains_real(),
+            Expr::And(items) | Expr::Or(items) => items.iter().any(Expr::contains_real),
+            _ => false,
+        }
+    }
+
     /// Depth-first read-only walk (parents before children).
     pub fn visit<V: Visitor<F, S>>(&self, v: &mut V) {
         if !v.enter(self) {

@@ -3,6 +3,7 @@ use crate::ast::{
 };
 use crate::lex::{Spanned, Token, lex_with_spans};
 
+#[derive(Clone)]
 pub struct ParseResult<F, S, K> {
     pub expr: Expr<F, S>,
     pub sorts: Vec<SortSpec<K>>,

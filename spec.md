@@ -48,3 +48,9 @@ query down with it. Every degradation is also reported twice: as a string in
 The library provides `blend_relevance`, a mathematical heuristic combining a `bm25` Full-Text Search score with an exponential recency decay. It also provides `collect_text_terms`, which traverses the generic AST to harvest bare-text components, skipping negated subtrees (`NOT x` is not a positive term). Consumers use these extracted strings to supply their underlying SQLite FTS queries while bypassing the strictly fielded constraints.
 
 The `fuzzy` module centralizes the shared fuzzy matcher: `damerau_levenshtein` (optimal string alignment), `within` (the bounded, early-exiting predicate), `threshold` (length-aware bands: 1-4 characters tolerate one edit, 5-7 two, longer three), and `hit` (accent-folded, whole-candidate-or-any-word). It ships no evaluation; consumers call it from their own field matching.
+
+## 5. Hashing and the Query Cache
+
+`Expr<F, S>` implements `Eq` and `Hash` (as do `MatchKind`, `Comparator`, `DateSpec`, `SortSpec`, and `Value`), with one deliberate exception (decided 2026-09-11): **`Value::Real` is dropped from hashability.** Its payload never enters a `Hash` impl (the variant hashes as a bare discriminant), so there are no f64 bit-pattern, `-0.0`, or NaN hazards anywhere in the crate. The contract that keeps this sound: a cache keyed on `Expr` must skip any query where `Expr::contains_real()` is true, recognizing real-carrying queries instead of hashing them.
+
+`QueryCache<F, S, K>` (module `cache`) is a dependency-free LRU memoizing `parse`, keyed by the raw query string. A real-carrying query bypasses it in both directions: never written, hence never served. Memoizing SQL translation stays consumer-side: translate the parsed `Expr` once and key that cache on the hashable tree, applying the same `contains_real` skip.
