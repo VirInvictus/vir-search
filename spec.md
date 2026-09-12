@@ -28,6 +28,15 @@ Consumers must implement:
 - `ParseState`: Resolves `is:*` boolean states.
 - `ParseSort`: Resolves `sort:*` directives extracted during parsing.
 
+### 2.3 Perspectives (`vl:`)
+`parse_with_resolver(input, resolver)` expands `vl:name` through the
+consumer-provided `PerspectiveResolver`, whose `expression(name)` returns the
+named perspective's stored query text (or `None`). Expansion semantics:
+- No resolver attached (plain `parse`): `vl:name` degrades to the literal text node `vl:name`.
+- Unknown name: the node degrades to `Expr::Empty` with a warning and a spanned diagnostic on the name.
+- A cycle (`vl:a` -> `vl:b` -> `vl:a`) is cut at the first repeat: the node degrades to `Expr::Empty` with a "perspective cycle" warning. Each expansion branch tracks its own ancestor chain, so a diamond (`a` referencing `b` and `c`, both referencing `d`) is fine.
+- The sub-parse is full-fidelity: its warnings, diagnostics, and extracted `sort:` directives merge into the outer `ParseResult`.
+
 ## 3. Fallback and Degradation Policies
 
 The parser enforces a strict "never fail" policy, structurally: there is no

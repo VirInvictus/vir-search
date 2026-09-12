@@ -118,8 +118,8 @@ fn start_epoch(date: NaiveDate) -> i64 {
     date.and_time(NaiveTime::MIN).and_utc().timestamp()
 }
 
-/// `Utc::now` is unavailable in some contexts; the caller passes `today`. This
-/// convenience is for the binary.
+/// `Utc::now` is unavailable in some contexts; the caller passes `today`.
+/// Convenience for consumers that just want today's date.
 pub fn today_utc() -> NaiveDate {
     Utc::now().date_naive()
 }
