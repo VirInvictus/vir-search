@@ -94,6 +94,12 @@
       (MatchKind shapes + walker in-library after the boundary record is
       fixed; per-schema fragments stay consumer-side); QueryCache hit-path
       tuning only once a consumer adopts it.
-- [ ] **GitHub presentation (workspace batch):** description empty,
+- [x] **GitHub presentation (workspace batch):** description empty,
       topics null, zero Releases, Cargo.toml lacks keywords/categories -
-      proposals drafted in the ledger.
+      proposals drafted in the ledger. *(Applied 2026-09-13 per decision
+      60: description set from the README lead, 10 discovery topics
+      (rust, parser, lexer, query-language, abstract-syntax-tree, search,
+      calibre, fuzzy-search, text-processing, bm25), Releases created for
+      v1.0.4 through v1.4.2 from the tag annotations (the verbatim
+      patchnotes entries), wiki off, discussions on; Cargo.toml gained
+      keywords/categories in the 1.4.2 bump.)*
