@@ -1,12 +1,22 @@
+//! The recursive-descent parser: tokens in, a typed [`Expr`] out, never an
+//! error. Every degradation is local and reported twice (flat warning plus
+//! byte-spanned diagnostic).
+
 use crate::ast::{
     Comparator, DateSpec, Expr, MatchKind, ParseField, ParseSort, ParseState, SortSpec, Value,
 };
 use crate::lex::{Spanned, Token, lex_with_spans};
 
+/// The parse output: the tree plus everything the parse recorded along the
+/// way (extracted sorts, warnings, spanned diagnostics).
 #[derive(Clone)]
 pub struct ParseResult<F, S, K> {
+    /// The parsed tree. Never a failure: degraded fragments live in here as
+    /// text nodes, not in an error channel.
     pub expr: Expr<F, S>,
+    /// Sort directives extracted from `sort:` prefixes, in query order.
     pub sorts: Vec<SortSpec<K>>,
+    /// Every degradation, in order, as plain strings (the flat log).
     pub warnings: Vec<String>,
     /// The warnings that carry a byte span in the input (`start..end`, end
     /// exclusive), for search-bar underlines. Every diagnostic also appears
@@ -18,8 +28,11 @@ pub struct ParseResult<F, S, K> {
 /// input are responsible.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
+    /// What went wrong, phrased like its sibling warning in `warnings`.
     pub message: String,
+    /// First byte of the responsible fragment.
     pub start: usize,
+    /// One past the last byte of the responsible fragment.
     pub end: usize,
 }
 
@@ -40,7 +53,11 @@ const MAX_DEPTH: usize = 128;
 /// is involutive, so the capped chain negates exactly when the input did.
 const MAX_NEGATIONS: usize = 64;
 
+/// Expands `vl:name` perspectives for [`parse_with_resolver`]. Returning
+/// `None` degrades the node to `Expr::Empty` with a warning; `()` is a
+/// built-in resolver that always answers `None` (used by plain [`parse`]).
 pub trait PerspectiveResolver<F, S> {
+    /// The named perspective's stored query text, if it exists.
     fn expression(&self, name: &str) -> Option<String>;
 }
 
@@ -50,10 +67,14 @@ impl<F, S> PerspectiveResolver<F, S> for () {
     }
 }
 
+/// Parse a search expression. Never fails: see the crate docs for the
+/// degradation contract, the README for the grammar.
 pub fn parse<F: ParseField, S: ParseState, K: ParseSort>(input: &str) -> ParseResult<F, S, K> {
     parse_inner::<F, S, K, ()>(input, None, &[], 0)
 }
 
+/// Like [`parse`], with a resolver that expands `vl:name` perspective
+/// references (cycle-guarded, depth-bounded).
 pub fn parse_with_resolver<
     F: ParseField,
     S: ParseState,

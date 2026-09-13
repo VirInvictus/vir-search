@@ -59,14 +59,17 @@ impl<F: ParseField, S: ParseState, K: ParseSort> QueryCache<F, S, K> {
         self.entries.contains_key(input)
     }
 
+    /// How many results are currently memoized.
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
+    /// Whether nothing is currently memoized.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
+    /// Drop every memoized result.
     pub fn clear(&mut self) {
         self.entries.clear();
         self.order.clear();

@@ -12,19 +12,34 @@ The library is explicitly designed to handle the parsing stage of a query pipeli
 
 The core parser uses recursive descent to produce an AST. It is designed around a **"never fail"** philosophy: syntax errors, unrecognized fields, or malformed constraints do not panic or return hard errors. Instead, they gracefully degrade into raw text-matching nodes. This ensures that users can always fall back to standard full-text search behavior even if they type something the parser doesn't natively understand.
 
-### The Grammar
+### The Grammar (normative)
 
-The library understands a deep, Calibre-compatible grammar:
-- **Field Matches**: `author:sanderson` (substring), `author:=Brandon` (exact), `title:~regex` (regex), `title:?fuzzy` (fuzzy, via the shared `fuzzy` module: Damerau-Levenshtein with a length-aware threshold, accent-folded).
-- **Wildcards and In-Lists** (1.3.0): `title:foo*` / `author:*bar` (prefix and suffix match), `(author:(a,b,c))`-style `In` lists as an OR over the members.
-- **Relational Constraints**: `rating:>=4`, `duration:>600`. A relational comparator on a text field (`author:>=Sanderson`) degrades to a visible text match rather than dropping the query.
-- **Date Arithmetic**: `added:thisweek`, `added:tomorrow`, `added:lastweek`, `added:nextweek`, `year:2020..2023`, `added:3daysago`, plus the 1.3.0 relative forms (`in7days`, `lastmonth`, `nextmonth`, `+7d` / `-14d`). Date arithmetic is dynamically resolved against the current epoch during parsing using `chrono`.
-- **Durations and Magnitudes** (1.3.0): human duration chains (`1h30m`, `3d`) for duration fields and size suffixes (`320k`, `50mb`) for numeric fields, so `size:<50mb` parses the way it reads.
-- **States**: `is:finished`, `is:starred`.
-- **Sorts and Perspectives**: `sort:-added` extracts a sort directive; `vl:name` expands a named perspective through a resolver you provide.
-- **Logic**: Parentheses, `AND`, `OR`, `NOT` (including doubled negation).
+| Form | Example | AST / meaning |
+|---|---|---|
+| Bareword | `roygbiv` | `Text`: free-text match (FTS or substring) |
+| Quoted string | `"boards of canada"` | `Text`: literal; never intercepted by wildcards or boolean words |
+| Field + value | `author:sanderson` | `Field` with `MatchKind::Substring` |
+| Exact | `author:=Brandon` | `Field` with `MatchKind::Exact` |
+| Regex | `title:~^Live` | `Field` with `MatchKind::Regex` (applied consumer-side) |
+| Fuzzy | `title:?stromlite` | `Field` with `MatchKind::Fuzzy`: Damerau-Levenshtein with a length-aware threshold, accent-folded (the shared `fuzzy` module) |
+| Prefix / suffix | `title:foo*`, `author:*bar` | `Field` with `MatchKind::Prefix` / `Suffix` (unquoted single-word values only) |
+| In-list | `genre:(rock,jazz)` | `Field` with `MatchKind::In`: an OR over the members; no spaces inside the list |
+| Presence | `genre:true` / `genre:false` | `Field` with `MatchKind::HasAny` / `HasNone` (quoted forms stay literal substring) |
+| Relational | `rating:>=4`, `duration:<600` | `Compare` on `Int`/`Real`/`Date` fields; on a text field the fragment degrades to visible text |
+| Range | `year:2020..2023` | `Range` (low inclusive, high exclusive) |
+| Date keywords | `added:today`, `yesterday`, `tomorrow`, `thisweek`, `lastweek`, `nextweek`, `thismonth`, `lastmonth`, `nextmonth`, `thisyear` | `Compare` with the symbolic `DateSpec` |
+| Relative dates | `added:3daysago`, `added:in7days`, `added:+7d`, `added:-14d` | `Compare` with `DateSpec::DaysAgo(n)` / `InDays(n)` |
+| Calendar dates | `added:2024`, `added:2024-06`, `added:2024-06-08` | `Compare` with `DateSpec::Ymd` |
+| Durations | `duration:1h30m`, `duration:90m`, `duration:2d12h` | `Value::Real` seconds on `Real` fields |
+| Magnitudes | `size:320k`, `size:<50mb` | `Value::Real` scaled (`k`/`mb`/`gb`) |
+| State | `is:finished` | `State` (the consumer's `ParseState`) |
+| Sort | `sort:-added` | Extracted into `ParseResult.sorts`; the node itself is empty |
+| Perspective | `vl:reading` | Expanded through the consumer's resolver (`parse_with_resolver`) |
+| Logic | `a AND b`, `a OR b`, `NOT a`, `!a`, `( ... )` | `And` / `Or` / `Not`; doubled negation parses |
 
-Degradation is local and visible: a quoted value is always literal text (`genre:"true"` is a substring match, not the `genre:true` presence check), a trailing operator or missing value keeps what already parsed, and every degraded fragment records a warning in `ParseResult.warnings` plus a byte-spanned entry in `ParseResult.diagnostics`, so a UI can underline the exact broken fragment.
+Date tokens never resolve at parse time: they stay symbolic `DateSpec` values, and `dates::resolve_range(spec, today)` turns one into a concrete `[start, end)` epoch-seconds (UTC) window whenever the consumer asks, so a stored query never bakes in a timestamp. Resolution saturates at the representable date edges, so an absurd offset (`added:4294967295daysago`) clamps instead of panicking.
+
+Degradation is local and visible: a quoted value is always literal text (`genre:"true"` is a substring match, not the `genre:true` presence check), a trailing operator or missing value keeps what already parsed, a stray `)` is consumed with a warning while the rest of the query keeps parsing, and recursion is bounded (a pathologically deep fragment degrades to text instead of overflowing the stack). Every degraded fragment records a warning in `ParseResult.warnings` plus a byte-spanned entry in `ParseResult.diagnostics`, so a UI can underline the exact broken fragment.
 
 ## Usage
 

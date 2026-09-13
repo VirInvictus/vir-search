@@ -2,32 +2,57 @@
 
 use std::fmt;
 
+/// The value grammar a field's values parse under.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldType {
+    /// Free text: substring, exact, regex, fuzzy, wildcard, and list matches
+    /// all apply; a relational comparator degrades to visible text.
     String,
+    /// Signed 64-bit integer values (`rating:>=4`).
     Int,
+    /// Floating-point values, also fed by duration and magnitude parsing
+    /// (`duration:>90m`, `size:<50mb`).
     Real,
+    /// Symbolic [`DateSpec`] values resolved later against a day
+    /// (`added:thisweek`).
     Date,
 }
 
+/// The consumer's metadata-field enum: name resolution plus the type that
+/// steers value parsing.
 pub trait ParseField: Clone + std::fmt::Display + PartialEq {
+    /// Parse a field name as written in a query (`author`), or `None` when
+    /// the name is unknown (the node then degrades to text with a warning).
     fn parse(name: &str) -> Option<Self>;
+    /// Which value grammar applies to this field's values.
     fn field_type(&self) -> FieldType;
 }
 
+/// The consumer's `is:*` boolean-state enum.
 pub trait ParseState: Clone + std::fmt::Display + PartialEq {
+    /// Parse a state name as written (`is:finished`), or `None` when unknown
+    /// (the node degrades to text with a warning).
     fn parse(name: &str) -> Option<Self>;
 }
 
+/// The consumer's `sort:*` key enum.
 pub trait ParseSort: Clone + std::fmt::Display + PartialEq {
+    /// Parse a sort key as written (`sort:-added`), or `None` when unknown
+    /// (the directive degrades to text with a warning).
     fn parse(name: &str) -> Option<Self>;
 }
 
+/// How a field constraint matches its value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MatchKind {
+    /// Plain containment (`author:sanderson`).
     Substring(String),
+    /// Whole-value equality (`author:=Brandon`).
     Exact(String),
+    /// Regular-expression match (`title:~^Live`); applied consumer-side.
     Regex(String),
+    /// Accent-folded fuzzy match (`title:?stromlite`); applied consumer-side
+    /// via the [`fuzzy`](crate::fuzzy) module.
     Fuzzy(String),
     /// `foo*`: the value starts with the base.
     Prefix(String),
@@ -35,21 +60,32 @@ pub enum MatchKind {
     Suffix(String),
     /// `(a,b)`: the value equals any of the list.
     In(Vec<String>),
+    /// The field is present at all (`genre:true`).
     HasAny,
+    /// The field is absent (`genre:false`).
     HasNone,
 }
 
+/// A relational comparison operator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Comparator {
+    /// `=`
     Eq,
+    /// `!=`
     Ne,
+    /// `<`
     Lt,
+    /// `<=`
     Le,
+    /// `>`
     Gt,
+    /// `>=`
     Ge,
 }
 
 impl Comparator {
+    /// The operator as written in a query, so `Display` renders exactly what
+    /// re-parses to the same tree.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Eq => "=",
@@ -62,20 +98,38 @@ impl Comparator {
     }
 }
 
+/// A symbolic date expression. Resolution to a concrete `[start, end)`
+/// epoch-seconds range happens when the consumer calls
+/// [`resolve_range`](crate::dates::resolve_range), so a parsed tree never
+/// bakes in a timestamp.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DateSpec {
+    /// `today`: the current UTC day.
     Today,
+    /// `yesterday`.
     Yesterday,
+    /// `tomorrow`.
     Tomorrow,
+    /// `thisweek`: Monday through Sunday of the current week.
     ThisWeek,
+    /// `lastweek`.
     LastWeek,
+    /// `nextweek`.
     NextWeek,
+    /// `thismonth`.
     ThisMonth,
+    /// `lastmonth`.
     LastMonth,
+    /// `nextmonth`.
     NextMonth,
+    /// `thisyear`.
     ThisYear,
+    /// `3daysago` / `-3d`: the single day `n` days back.
     DaysAgo(u32),
+    /// `in3days` / `+3d`: the single day `n` days forward.
     InDays(u32),
+    /// `2024`, `2024-06`, or `2024-06-08`: a year, month, or single day
+    /// (`None` = "any").
     Ymd(i32, Option<u32>, Option<u32>),
 }
 
@@ -101,8 +155,10 @@ impl fmt::Display for DateSpec {
     }
 }
 
+/// A parsed comparison value.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
+    /// An integer literal (`rating:4`).
     Int(i64),
     /// A real-number literal (`rating:>=4.5`, `duration:>90m`). Deliberately
     /// excluded from hashing (decided 2026-09-11): its payload never enters a
@@ -110,7 +166,9 @@ pub enum Value {
     /// with [`Expr::contains_real`] and skipped by caches instead of hashed.
     /// There is no f64 bit-pattern story to get wrong.
     Real(f64),
+    /// A symbolic date (`added:thisweek`).
     Date(DateSpec),
+    /// A literal string, as in a degraded fragment or a text range bound.
     Text(String),
 }
 
@@ -142,33 +200,54 @@ impl fmt::Display for Value {
     }
 }
 
+/// A sort directive extracted during parsing (`sort:-added`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SortSpec<K> {
+    /// The consumer's sort key.
     pub key: K,
+    /// `true` when written with a leading `-`.
     pub descending: bool,
 }
 
+/// The typed search-expression tree the parser produces.
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub enum Expr<F, S> {
+    /// Identity node: empty input, or a degraded fragment folded away.
     Empty,
+    /// Bare free text, matched via FTS or substring.
     Text(String),
+    /// A direct metadata-field constraint (`author:sanderson`).
     Field {
+        /// The consumer's field.
         field: F,
+        /// How the value matches.
         kind: MatchKind,
     },
+    /// A relational constraint (`rating:>=4`).
     Compare {
+        /// The consumer's field.
         field: F,
+        /// The operator.
         comp: Comparator,
+        /// The parsed value.
         value: Value,
     },
+    /// A bounded range (`year:2020..2023`).
     Range {
+        /// The consumer's field.
         field: F,
+        /// Inclusive lower bound.
         low: Value,
+        /// Exclusive upper bound.
         high: Value,
     },
+    /// A boolean binary state (`is:read`).
     State(S),
+    /// Logical negation (`NOT x`, `!x`).
     Not(Box<Expr<F, S>>),
+    /// Conjunction of the operands.
     And(Vec<Expr<F, S>>),
+    /// Disjunction of the operands.
     Or(Vec<Expr<F, S>>),
 }
 
@@ -187,6 +266,8 @@ impl<F: ParseField, S: ParseState> Eq for Expr<F, S> {}
 /// hooks you need — the node itself carries everything, so `enter` alone is
 /// enough for counting, collection, and SQL-eligibility checks.
 pub trait Visitor<F, S> {
+    /// Called for every node, parents before children. Return `false` to
+    /// skip that node's children.
     fn enter(&mut self, _expr: &Expr<F, S>) -> bool {
         true
     }
@@ -196,6 +277,7 @@ pub trait Visitor<F, S> {
 /// already folded, and its return replaces the node. A no-op `fold_node`
 /// rebuilds the tree unchanged.
 pub trait Folder<F, S> {
+    /// Replace (or keep) a node whose children are already folded.
     fn fold_node(&mut self, expr: Expr<F, S>) -> Expr<F, S> {
         expr
     }
@@ -311,6 +393,9 @@ fn paren<F: ParseField, S: ParseState>(expr: &Expr<F, S>) -> String {
     }
 }
 
+/// Quote a rendered term when re-lexing it bare would mis-split (whitespace,
+/// operators, reserved words), escaping backslashes and quotes so `Display`
+/// round-trips.
 pub fn quote_if_needed(s: &str) -> String {
     let boundary = |c: char| {
         c.is_whitespace() || matches!(c, '(' | ')' | ':' | '"' | '~' | '?' | '!' | '<' | '>' | '=')

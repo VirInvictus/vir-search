@@ -19,4 +19,5 @@ A domain-agnostic Rust library for parsing Calibre-style search expressions into
 cargo check
 cargo test
 cargo fmt
+cargo clippy --workspace --all-targets -- -D warnings
 ```

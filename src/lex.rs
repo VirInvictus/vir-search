@@ -1,33 +1,51 @@
 //! Tokenizer. Best-effort: it never fails, so the parser can decide
 //! how to degrade malformed input.
 
+/// A lexical token. Best-effort: nothing here fails, so the parser decides
+/// how to degrade malformed input.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
     /// A bareword (may contain `.`, `-`, digits, unicode).
     Word(String),
     /// A `"quoted string"`.
     Quoted(String),
+    /// `:`
     Colon,
+    /// `(`
     LParen,
+    /// `)`
     RParen,
-    Eq,     // =
-    Ne,     // !=
-    Lt,     // <
-    Le,     // <=
-    Gt,     // >
-    Ge,     // >=
-    Tilde,  // ~ (regex prefix)
-    Quest,  // ? (fuzzy prefix)
-    Bang,   // ! (NOT)
-    DotDot, // .. (range)
+    /// `=`
+    Eq,
+    /// `!=`
+    Ne,
+    /// `<`
+    Lt,
+    /// `<=`
+    Le,
+    /// `>`
+    Gt,
+    /// `>=`
+    Ge,
+    /// `~` (regex prefix)
+    Tilde,
+    /// `?` (fuzzy prefix)
+    Quest,
+    /// `!` (NOT)
+    Bang,
+    /// `..` (range)
+    DotDot,
 }
 
 /// A token with its byte span in the source (`start..end`, end exclusive), so
 /// consumers can underline the exact broken fragment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Spanned {
+    /// The token itself.
     pub token: Token,
+    /// First byte of the token in the input.
     pub start: usize,
+    /// One past the token's last byte.
     pub end: usize,
 }
 
@@ -37,6 +55,7 @@ fn is_boundary(c: char) -> bool {
     c.is_whitespace() || matches!(c, '(' | ')' | ':' | '"' | '~' | '?' | '!' | '<' | '>' | '=')
 }
 
+/// Tokenize, dropping spans (see [`lex_with_spans`] for the spanned form).
 pub fn lex(input: &str) -> Vec<Token> {
     lex_with_spans(input).into_iter().map(|s| s.token).collect()
 }
