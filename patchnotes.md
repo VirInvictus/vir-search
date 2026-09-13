@@ -1,5 +1,41 @@
 # vir-search Patch Notes
 
+## v1.4.2 (2026-09-13)
+
+**Robustness release.** Three never-fail holes close and the docs catch up
+to the code; no grammar changes.
+
+*   **Bounded recursion (HIGH).** `"("*50000` used to overflow the stack
+    inside the parser (an abort no caller can catch), and `"!"*100000`
+    parsed into a `Not` chain whose `Drop`/`Display`/`visit` overflowed
+    later. The parser now carries a depth budget of 128: a `(` past the
+    budget degrades to its literal text with a spanned warning, the budget
+    threads through `vl:` perspective expansion, and one factor wraps at
+    most 64 negation marks, dropping the rest with parity preserved so the
+    capped chain negates exactly when the full run would have. Deep input
+    parses to a shallow, warning-carrying tree that still round-trips.
+*   **A stray `)` no longer discards the rest of the query (MEDIUM).**
+    `author:x ) title:y` used to drop `title:y` silently, contradicting the
+    degrade-and-record policy. A top-level closer is now consumed with a
+    spanned "unmatched" warning and the parser keeps collecting.
+*   **Out-of-range date offsets saturate instead of panicking (MEDIUM).**
+    `added:4294967295daysago` parsed cleanly and aborted at resolve. The
+    week/offset arms of `resolve_range` now walk `checked_add_days`/
+    `checked_sub_days` with saturating fallbacks, so an absurd offset
+    clamps to the representable date edges.
+*   **Docs/API:** crate-level rustdoc plus a `missing_docs` lint (CI's
+    clippy `-D warnings` gate enforces it), with the whole public surface
+    documented; the README's grammar list becomes a normative table; the
+    README's false "resolved during parsing using chrono" claim is
+    corrected (dates stay symbolic `DateSpec` until the consumer calls
+    `resolve_range`); the spec's degradation policy records the
+    bounded-recursion and stray-closer behavior; `Cargo.toml` gains
+    keywords and categories; the crate guidance names the clippy gate CI
+    actually runs.
+
+Suite: 64 green (20 unit + 33 parse + 3 rank + 8 cache), clippy
+`-D warnings` clean, `cargo fmt --check` clean.
+
 ## v1.4.1 (2026-09-12)
 
 **Bugfix + the decided hashable-AST design.** The month-keyword parse gap

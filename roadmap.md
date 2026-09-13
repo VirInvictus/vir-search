@@ -36,26 +36,48 @@
 
 ## New findings 2026-09-12 (six-lens full audit; detail: audit/FULL-AUDIT-2026-09-12.md, Wave 11)
 
-- [ ] **HIGH: unbounded recursion.** "("*50000 overflows the stack in
+- [x] **HIGH: unbounded recursion.** "("*50000 overflows the stack in
       predicate/boolean_expr (an abort, not a panic - violating the
       never-fail contract), and "!"*100000 parses into a Not chain whose
       Drop/Display/visit overflow later. Add a parser depth cap that
       degrades the fragment to text (spanned warning), and bound negation
-      wrapping the same way; thread the depth through resolve_vl.
-- [ ] **MEDIUM: chrono Days operators panic on out-of-range offsets**
+      wrapping the same way; thread the depth through resolve_vl. *(Shipped
+      1.4.2: a depth budget of 128 shared by parentheses and `vl:` expansion
+      degrades an over-deep `(` to its literal text with a spanned warning;
+      one factor wraps at most 64 negation marks, dropping the rest with
+      parity preserved so the capped chain negates exactly when the full
+      run would have. Deep input parses to a shallow, warning-carrying
+      tree; the new tests pin degradation, depth bounds, parity, and
+      round-trips of the degraded trees.)*
+- [x] **MEDIUM: chrono Days operators panic on out-of-range offsets**
       (dates.rs week/DaysAgo/InDays arms): added:4294967295daysago parses
       cleanly and aborts at resolve. Use checked_add/sub_days with
-      saturating fallback (the next_day/prev_day pattern already in file).
-- [ ] **MEDIUM: a stray ) silently discards the rest of the query**
+      saturating fallback (the next_day/prev_day pattern already in file). *(Shipped
+      1.4.2: `add_days`/`sub_days` wrap the checked chrono ops with
+      saturating fallbacks to `NaiveDate::MAX`/`MIN`, and every arm,
+      including next_day/prev_day, rides them; an absurd offset clamps to
+      the representable edge. Pinned by a dates unit test at both edges
+      plus the reported repro end to end (parse then resolve).)*
+- [x] **MEDIUM: a stray ) silently discards the rest of the query**
       (boolean_term breaks at RParen and the remainder is dropped without
       a warning - contradicting spec 3). Consume it, warn_spanned, and
-      keep collecting.
-- [ ] **Docs/API:** README's "resolved during parsing using chrono" is
+      keep collecting. *(Shipped 1.4.2: a top-level `)` is consumed with a
+      spanned "unmatched" warning in both places one is reached - the
+      term loop and the predicate arm a leading stray hits - and parsing
+      continues; `author:x ) title:y` now equals
+      `author:x AND title:y` plus a warning.)*
+- [x] **Docs/API:** README's "resolved during parsing using chrono" is
       false (symbolic DateSpec; consumer-invoked resolve_range); no
       crate-level rustdoc or missing_docs; parse/Expr/DateSpec/MatchKind/
       rank.rs undocumented while the 1.4.x additions are; no normative
       grammar table exists anywhere (add one to README or a spec
-      appendix); clippy missing from CLAUDE.md commands.
+      appendix); clippy missing from CLAUDE.md commands. *(Done 1.4.2:
+      crate-level rustdoc + `#![warn(missing_docs)]` (CI clippy enforces)
+      with the full public surface documented; README grammar is now a
+      normative table and the date claim is rewritten (symbolic DateSpec,
+      consumer-invoked `resolve_range`, saturating edges); spec 3 records
+      the stray-closer and bounded-recursion policy; CLAUDE.md names the
+      clippy gate.)*
 - [ ] **Consumer-doc drift found by the cross-repo lens (their lanes):**
       Atrium's spec documents Ndaysout and a quoted-exact form that do
       not exist; Conservatory's keyword list is missing seven families
