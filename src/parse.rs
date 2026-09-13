@@ -27,6 +27,19 @@ pub struct Diagnostic {
 /// bare fn-pointer type trips `clippy::type_complexity`.
 type Combiner<F, S> = fn(Vec<Expr<F, S>>) -> Expr<F, S>;
 
+/// Deepest parenthesized group (or chained `vl:` expansion) the parser will
+/// descend into. The never-fail contract is structural, and a stack overflow
+/// aborts rather than panics: past this budget the parser degrades the
+/// fragment to text with a warning instead of recursing.
+const MAX_DEPTH: usize = 128;
+
+/// Consecutive negation marks one factor may wrap. The wrapping loop is
+/// iterative, but the resulting `Not` chain is walked recursively by `Drop`,
+/// `Display`, and `visit`, so a pathological run (`"!"*100000`) must not
+/// become a chain that deep. Extras are dropped with parity preserved: `Not`
+/// is involutive, so the capped chain negates exactly when the input did.
+const MAX_NEGATIONS: usize = 64;
+
 pub trait PerspectiveResolver<F, S> {
     fn expression(&self, name: &str) -> Option<String>;
 }
@@ -38,7 +51,7 @@ impl<F, S> PerspectiveResolver<F, S> for () {
 }
 
 pub fn parse<F: ParseField, S: ParseState, K: ParseSort>(input: &str) -> ParseResult<F, S, K> {
-    parse_inner::<F, S, K, ()>(input, None, &[])
+    parse_inner::<F, S, K, ()>(input, None, &[], 0)
 }
 
 pub fn parse_with_resolver<
@@ -50,13 +63,14 @@ pub fn parse_with_resolver<
     input: &str,
     resolver: &R,
 ) -> ParseResult<F, S, K> {
-    parse_inner(input, Some(resolver), &[])
+    parse_inner(input, Some(resolver), &[], 0)
 }
 
 fn parse_inner<F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S>>(
     input: &str,
     resolver: Option<&R>,
     seen: &[String],
+    depth: usize,
 ) -> ParseResult<F, S, K> {
     let mut p = Parser {
         tokens: lex_with_spans(input),
@@ -67,6 +81,8 @@ fn parse_inner<F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolve
         diagnostics: Vec::new(),
         resolver,
         seen: seen.to_vec(),
+        depth,
+        paren_depth: 0,
         _marker: std::marker::PhantomData,
     };
     ParseResult {
@@ -86,6 +102,13 @@ struct Parser<'a, F, S, K, R> {
     diagnostics: Vec<Diagnostic>,
     resolver: Option<&'a R>,
     seen: Vec<String>,
+    /// Recursion budget spent by enclosing groups and `vl:` expansions,
+    /// against [`MAX_DEPTH`]. Shared across a perspective chain: the
+    /// sub-parse inherits the parent's depth plus one.
+    depth: usize,
+    /// Paren groups currently open in this parse. A `)` with this at zero
+    /// closes nothing: it is a stray, not a closer.
+    paren_depth: usize,
     _marker: std::marker::PhantomData<(F, S)>,
 }
 
@@ -143,7 +166,16 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
         let mut items = vec![self.boolean_factor()];
         while let Some(t) = self.peek() {
             if t == &Token::RParen {
-                break;
+                if self.paren_depth > 0 {
+                    break;
+                }
+                // No group is open, so this closes nothing: consume it, warn,
+                // and keep collecting. Breaking here would silently discard
+                // the rest of the query.
+                if let Some(sp) = self.advance_spanned() {
+                    self.warn_spanned("unmatched ')'; ignored".into(), (sp.start, sp.end));
+                }
+                continue;
             }
             if let Token::Word(w) = t {
                 if w.eq_ignore_ascii_case("or") {
@@ -176,6 +208,7 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
 
     fn boolean_factor(&mut self) -> Expr<F, S> {
         let mut negations = 0usize;
+        let marks_before = self.pos;
         loop {
             match self.peek() {
                 Some(Token::Bang) => {
@@ -189,8 +222,31 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
                 _ => break,
             }
         }
+        // The marks' byte span, taken before the operand advances prev_span.
+        let marks_span = (negations > 0).then(|| {
+            (
+                self.tokens[marks_before].start,
+                self.tokens[self.pos - 1].end,
+            )
+        });
         let mut expr = self.predicate();
-        for _ in 0..negations {
+        let wraps = if negations <= MAX_NEGATIONS {
+            negations
+        } else {
+            let mut w = MAX_NEGATIONS;
+            if w % 2 != negations % 2 {
+                w += 1;
+            }
+            w
+        };
+        if negations > wraps {
+            let span = marks_span.unwrap_or((0, self.input_len));
+            self.warn_spanned(
+                format!("{negations} consecutive negations exceed the cap; keeping {wraps}"),
+                span,
+            );
+        }
+        for _ in 0..wraps {
             expr = Expr::Not(Box::new(expr));
         }
         expr
@@ -205,7 +261,19 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
         let t_span = (sp.start, sp.end);
         match sp.token {
             Token::LParen => {
+                if self.depth >= MAX_DEPTH {
+                    // The recursion budget is spent. Degrade this group to
+                    // its literal text (the punctuation-degradation pattern)
+                    // instead of recursing into a stack overflow; the
+                    // remaining tokens keep parsing as siblings.
+                    self.warn_spanned("nested too deeply; matching as text".into(), t_span);
+                    return text_or_empty("(".into());
+                }
+                self.depth += 1;
+                self.paren_depth += 1;
                 let inner = self.boolean_expr();
+                self.depth -= 1;
+                self.paren_depth -= 1;
                 if self.peek() == Some(&Token::RParen) {
                     self.pos += 1;
                 } else {
@@ -283,7 +351,16 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
                 }
             }
             Token::Quoted(q) => text_or_empty(q),
-            Token::RParen => Expr::Empty,
+            Token::RParen => {
+                if self.paren_depth == 0 {
+                    // Nothing is open, so this closes nothing: a leading or
+                    // post-operator stray. Warn instead of silently reading
+                    // it as nothing (the boolean_term loop covers the
+                    // mid-factor position the same way).
+                    self.warn_spanned("unmatched ')'; ignored".into(), t_span);
+                }
+                Expr::Empty
+            }
             Token::Colon => text_or_empty(":".into()),
             Token::Eq => text_or_empty("=".into()),
             Token::Ne => text_or_empty("!=".into()),
@@ -546,13 +623,20 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
             self.warn_spanned(format!("perspective cycle at {name:?}; ignored"), span);
             return Expr::Empty;
         }
+        if self.depth >= MAX_DEPTH {
+            self.warn_spanned(
+                format!("perspective nested too deeply at {name:?}; ignored"),
+                span,
+            );
+            return Expr::Empty;
+        }
         let Some(text) = resolver.expression(name) else {
             self.warn_spanned(format!("unknown perspective {name:?}; ignored"), span);
             return Expr::Empty;
         };
         let mut seen = self.seen.clone();
         seen.push(key);
-        let sub = parse_inner(&text, self.resolver, &seen);
+        let sub = parse_inner(&text, self.resolver, &seen, self.depth + 1);
         self.warnings.extend(sub.warnings);
         self.diagnostics.extend(sub.diagnostics);
         self.sorts.extend(sub.sorts);

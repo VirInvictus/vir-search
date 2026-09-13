@@ -386,6 +386,122 @@ fn unclosed_paren_diagnostic_runs_to_the_end() {
     assert_eq!((d.start, d.end), (0, 14));
 }
 
+/// Recursive on purpose, but only ever called on trees whose depth the
+/// parser's caps bound; the deep-input tests assert that bound.
+fn expr_depth(expr: &Expr<TestField, TestState>) -> usize {
+    match expr {
+        Expr::Not(inner) => 1 + expr_depth(inner),
+        Expr::And(items) | Expr::Or(items) => 1 + items.iter().map(expr_depth).max().unwrap_or(0),
+        _ => 1,
+    }
+}
+
+#[test]
+fn deep_paren_nesting_degrades_instead_of_overflowing() {
+    let input = "(".repeat(50_000);
+    let p = parse::<TestField, TestState, TestSort>(&input);
+    assert!(
+        p.warnings.iter().any(|w| w.contains("nested too deeply")),
+        "deep nesting must degrade with a warning"
+    );
+    // The tree stays shallow enough for Drop/Display/visit to walk.
+    assert!(expr_depth(&p.expr) <= 200, "AST depth escaped the cap");
+    // The degraded tree still round-trips (the 1.4.1 bug class).
+    round_trip(&input);
+}
+
+#[test]
+fn negation_runs_are_capped_with_parity_kept() {
+    use vir_search::ast::Folder;
+
+    // Collapses each Not-Not pair during the walk, leaving the chain's
+    // parity: the cap drops redundant marks, never the negation itself.
+    struct CollapsePairs;
+    impl Folder<TestField, TestState> for CollapsePairs {
+        fn fold_node(&mut self, expr: Expr<TestField, TestState>) -> Expr<TestField, TestState> {
+            match expr {
+                Expr::Not(inner) => match *inner {
+                    Expr::Not(inner2) => *inner2,
+                    other => Expr::Not(Box::new(other)),
+                },
+                other => other,
+            }
+        }
+    }
+
+    // An even run of 100_000 marks must not negate; an odd one must.
+    let even =
+        parse::<TestField, TestState, TestSort>(&format!("{}genre:ambient", "!".repeat(100_000)));
+    assert!(
+        even.warnings
+            .iter()
+            .any(|w| w.contains("negations exceed the cap")),
+        "the capped run must warn"
+    );
+    assert_eq!(
+        even.expr.clone().fold_nodes(&mut CollapsePairs),
+        parse::<TestField, TestState, TestSort>("genre:ambient").expr,
+        "an even run of negations must not negate"
+    );
+    let odd =
+        parse::<TestField, TestState, TestSort>(&format!("{}genre:ambient", "!".repeat(99_999)));
+    assert_eq!(
+        odd.expr.clone().fold_nodes(&mut CollapsePairs),
+        parse::<TestField, TestState, TestSort>("NOT genre:ambient").expr,
+        "an odd run of negations must negate"
+    );
+    assert!(expr_depth(&odd.expr) <= 70, "Not chain escaped the cap");
+    // Both capped trees round-trip, and so does a bare run with no operand.
+    round_trip(&format!("{}genre:ambient", "!".repeat(100_000)));
+    round_trip(&"!".repeat(100_000));
+}
+
+#[test]
+fn deep_perspective_chains_are_refused_not_crashed() {
+    let mut map = HashMap::new();
+    for i in 0..300 {
+        map.insert(format!("p{i}"), format!("vl:p{}", i + 1));
+    }
+    map.insert("p300".into(), "genre:ambient".into());
+    let r = Perspectives(map);
+    let p = parse_with_resolver::<TestField, TestState, TestSort, _>("vl:p0", &r);
+    assert!(
+        p.warnings.iter().any(|w| w.contains("nested too deeply")),
+        "the over-deep expansion must be refused with a warning"
+    );
+}
+
+#[test]
+fn stray_close_paren_warns_and_keeps_the_rest() {
+    // The stray closer used to discard everything after it, silently.
+    let p = parse::<TestField, TestState, TestSort>("author:x ) title:y");
+    assert_eq!(
+        p.expr,
+        parse::<TestField, TestState, TestSort>("author:x AND title:y").expr,
+        "content after a stray ')' must survive"
+    );
+    assert!(p.warnings.iter().any(|w| w.contains("unmatched")));
+    assert_eq!((p.diagnostics[0].start, p.diagnostics[0].end), (9, 10));
+
+    // A leading stray reads as nothing, but still warns, and what follows
+    // parses.
+    let p = parse::<TestField, TestState, TestSort>(") genre:ambient");
+    assert_eq!(
+        p.expr,
+        parse::<TestField, TestState, TestSort>("genre:ambient").expr
+    );
+    assert!(p.warnings.iter().any(|w| w.contains("unmatched")));
+
+    // Balanced groups still claim their closers: no new warnings there.
+    let clean =
+        parse::<TestField, TestState, TestSort>("(genre:ambient OR genre:jazz) AND rating:>=4");
+    assert!(clean.warnings.is_empty());
+
+    // The degraded tree round-trips.
+    round_trip("author:x ) title:y");
+    round_trip("genre:ambient )) genre:jazz");
+}
+
 #[test]
 fn clean_parse_has_no_diagnostics() {
     let p = parse::<TestField, TestState, TestSort>("genre:ambient AND rating:>=4 sort:-added");
@@ -476,6 +592,25 @@ fn relative_date_semantics() {
             value: Value::Date(DateSpec::DaysAgo(14)),
         }
     );
+}
+
+#[test]
+fn huge_date_offset_parses_and_resolves_without_panicking() {
+    use vir_search::dates::{resolve_range, today_utc};
+
+    // The reported repro: this parsed cleanly and aborted at resolve, before
+    // resolution learned to saturate.
+    let p = parse::<TestField, TestState, TestSort>("added:4294967295daysago");
+    assert_eq!(
+        p.expr,
+        Expr::Compare {
+            field: TestField::Added,
+            comp: Comparator::Eq,
+            value: Value::Date(DateSpec::DaysAgo(u32::MAX)),
+        }
+    );
+    let (start, end) = resolve_range(&DateSpec::DaysAgo(u32::MAX), today_utc());
+    assert!(start <= end, "the saturated range must stay ordered");
 }
 
 #[test]
