@@ -14,18 +14,22 @@ pub fn resolve_range(spec: &DateSpec, today: NaiveDate) -> (i64, i64) {
         DateSpec::Yesterday => (prev_day(today), today),
         DateSpec::Tomorrow => (next_day(today), next_day(next_day(today))),
         DateSpec::LastWeek => {
-            let monday =
-                today - Days::new(today.weekday().num_days_from_monday() as u64) - Days::new(7);
-            (monday, monday + Days::new(7))
+            let monday = sub_days(
+                sub_days(today, today.weekday().num_days_from_monday() as u64),
+                7,
+            );
+            (monday, add_days(monday, 7))
         }
         DateSpec::NextWeek => {
-            let monday =
-                today - Days::new(today.weekday().num_days_from_monday() as u64) + Days::new(7);
-            (monday, monday + Days::new(7))
+            let monday = add_days(
+                sub_days(today, today.weekday().num_days_from_monday() as u64),
+                7,
+            );
+            (monday, add_days(monday, 7))
         }
         DateSpec::ThisWeek => {
-            let monday = today - Days::new(today.weekday().num_days_from_monday() as u64);
-            (monday, monday + Days::new(7))
+            let monday = sub_days(today, today.weekday().num_days_from_monday() as u64);
+            (monday, add_days(monday, 7))
         }
         DateSpec::ThisMonth => {
             let first = ymd(today.year(), today.month(), 1);
@@ -42,11 +46,11 @@ pub fn resolve_range(spec: &DateSpec, today: NaiveDate) -> (i64, i64) {
         }
         DateSpec::ThisYear => (ymd(today.year(), 1, 1), ymd(today.year() + 1, 1, 1)),
         DateSpec::DaysAgo(n) => {
-            let d = today - Days::new(*n as u64);
+            let d = sub_days(today, *n as u64);
             (d, next_day(d))
         }
         DateSpec::InDays(n) => {
-            let d = today + Days::new(*n as u64);
+            let d = add_days(today, *n as u64);
             (d, next_day(d))
         }
         DateSpec::Ymd(y, None, _) => (ymd(*y, 1, 1), ymd(*y + 1, 1, 1)),
@@ -76,12 +80,24 @@ pub fn matches(comp: Comparator, value: i64, start: i64, end: i64) -> bool {
     }
 }
 
+/// `d + n`, saturating at the latest representable date. Never panics:
+/// resolution runs on consumer input, so an absurd offset
+/// (`added:4294967295daysago`) clamps instead of aborting the caller.
+fn add_days(d: NaiveDate, n: u64) -> NaiveDate {
+    d.checked_add_days(Days::new(n)).unwrap_or(NaiveDate::MAX)
+}
+
+/// `d - n`, saturating at the earliest representable date.
+fn sub_days(d: NaiveDate, n: u64) -> NaiveDate {
+    d.checked_sub_days(Days::new(n)).unwrap_or(NaiveDate::MIN)
+}
+
 fn next_day(d: NaiveDate) -> NaiveDate {
-    d.checked_add_days(Days::new(1)).unwrap_or(d)
+    add_days(d, 1)
 }
 
 fn prev_day(d: NaiveDate) -> NaiveDate {
-    d.checked_sub_days(Days::new(1)).unwrap_or(d)
+    sub_days(d, 1)
 }
 
 /// Build a date, clamping an out-of-range day to the last valid day of a month.
@@ -178,5 +194,24 @@ mod tests {
         let (s, e) = resolve_range(&DateSpec::InDays(3), today);
         assert_eq!(s, start_epoch(d(2026, 6, 23)));
         assert_eq!(e, start_epoch(d(2026, 6, 24)));
+    }
+
+    #[test]
+    fn extreme_offsets_saturate_instead_of_panicking() {
+        let today = d(2026, 6, 20);
+        // u32::MAX days cannot be stepped over in either direction: the range
+        // clamps to the representable edge rather than aborting the caller.
+        let (s, e) = resolve_range(&DateSpec::DaysAgo(u32::MAX), today);
+        assert_eq!(s, start_epoch(NaiveDate::MIN));
+        assert_eq!(e, start_epoch(add_days(NaiveDate::MIN, 1)));
+        let (s, e) = resolve_range(&DateSpec::InDays(u32::MAX), today);
+        assert_eq!(s, start_epoch(NaiveDate::MAX));
+        assert_eq!(e, start_epoch(NaiveDate::MAX));
+        // The week arms walk the same helpers, so they hold at the edges too.
+        resolve_range(&DateSpec::LastWeek, NaiveDate::MIN);
+        resolve_range(&DateSpec::ThisWeek, NaiveDate::MIN);
+        resolve_range(&DateSpec::NextWeek, NaiveDate::MAX);
+        resolve_range(&DateSpec::Tomorrow, NaiveDate::MAX);
+        resolve_range(&DateSpec::Yesterday, NaiveDate::MIN);
     }
 }
