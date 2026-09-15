@@ -2,7 +2,7 @@
 
 **Domain**: Expression parsing and AST generation.
 **Language**: Rust (edition 2024).
-**Dependencies**: `chrono`, `regex`, `unicode-normalization`.
+**Dependencies**: `chrono`, `unicode-normalization`.
 
 ## 1. Scope and Architecture
 

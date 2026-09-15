@@ -1,6 +1,6 @@
 # vir-search
 
-**Stack:** Rust (edition 2024, rust-version 1.85); deps `regex`, `chrono`, `unicode-normalization`.
+**Stack:** Rust (edition 2024, rust-version 1.85); deps `chrono`, `unicode-normalization` (`regex` removed 2026-09-15: it never had a use site; `MatchKind::Regex` is a String the consumers interpret).
 **Status:** Maintained. Standalone library.
 **Versioning deviation:** there is no `VERSION` file; `Cargo.toml` is the single version source (a `VERSION` file would be a second carrier Cargo cannot consume). Every bump still gets a patchnotes entry and an annotated tag at the release commit.
 

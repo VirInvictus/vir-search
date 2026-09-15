@@ -11,6 +11,5 @@ keywords = ["search", "parser", "query-language", "calibre", "ast"]
 categories = ["parser-implementations", "text-processing"]
 
 [dependencies]
-regex = "1.10"
 chrono = "0.4"
 unicode-normalization = "0.1"
