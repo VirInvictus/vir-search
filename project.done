@@ -1,0 +1,57 @@
+project.done — vir-search
+
+Completion date: 2026-09-15
+Commit range: 69e8b5c..6ac1b16 (17 commits on main, pushed; v1.4.3
+tagged verbatim at ae10c30, GitHub Release created, CI green on every
+push).
+
+What shipped (the final audit's consolidated ranked list, top-down):
+
+- The Display/round-trip semantic holes are closed: quote_if_needed
+  quotes the grammar-intercepted bare words (true/false any case,
+  wildcard shapes) through shared boundary helpers, a quoted In-list
+  body degrades to literal text (gate Q1: reject), nested combinators
+  render parenthesized, Not(Empty) can no longer render a bare "NOT "
+  that steals the next token, and a balanced empty group claims its
+  closer silently. The generated-input fuzz (5000 seeded LCG cases,
+  no dependencies) guards the class permanently; its first run caught
+  two of the holes.
+- Ymd years outside 0..=9999 degrade at parse with a warning (gate Q3),
+  killing the silent 1970-fallback range inversion.
+- The regex dependency is removed (gate Q2: remove; zero use sites in
+  the crate's life); lock and docs synced.
+- The degradation log is bounded (100 entries, 3 per message) with a
+  suppressed-count summary; unknown-field degradation keeps the whole
+  visible fragment.
+- 1.4.3 hygiene: Debug derives on ParseResult/QueryCache,
+  examples/mini_consumer.rs (the compile-checked minimal consumer),
+  API.md created.
+- The comment/doc truth batch, the resolve_vl perspective-span
+  coordinate documentation, the README/spec/roadmap grammar and prose
+  passes, and the fold-vs-FTS5 verification (empirical; claim softened
+  to the verified truth) all landed.
+- GitHub: tag-triggered CI, permissions block, README badge, private
+  vulnerability reporting enabled and verified.
+- Cascade: one consumer wave carried everything (Atrium c34639a,
+  Conservatory a3aa830; both locks at 1.4.3 @ 8087e93, suites green,
+  adoption lines in their patchnotes, CI green; cargo-sources.json
+  regenerated). Consumer-doc drift fixed under #117 (Atrium c2562bd,
+  Conservatory 256bfed), logged in both records.
+
+Reopen conditions (work recorded, deliberately not built):
+
+- PENDING GATES (asked 2026-09-15 in two rounds, unanswered at blitz
+  close; ask once more before building): the main-protection ruleset
+  (vir-gtk-class: block force-push + deletion, bypass Brandon), the
+  MSRV CI job pinning 1.85.0, logo.svg add-or-declare, and the
+  Cargo.toml readme/publish=false pins.
+- The diagnostic-ergonomics lane (severity, suggestions, line/col);
+  the perspective-span coordinate system is documented for it (spec
+  2.3, Diagnostic, parse_with_resolver).
+- The SQL push-down scaffold: a recorded deferral, sequenced with
+  future consumer waves; per-schema fragments stay consumer-side.
+- QueryCache hit-path tuning: behind first consumer adoption.
+- Calibre-parity operators (count, boolean variants, key-pair values):
+  speculative until a consumer asks; bare `added:7d` stays declined.
+- The streaming lexer: declined unless the push-down lane makes lexing
+  hot.
