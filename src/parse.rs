@@ -12,7 +12,7 @@ use crate::lex::{Spanned, Token, lex_with_spans};
 
 /// The parse output: the tree plus everything the parse recorded along the
 /// way (extracted sorts, warnings, spanned diagnostics).
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ParseResult<F, S, K> {
     /// The parsed tree. Never a failure: degraded fragments live in here as
     /// text nodes, not in an error channel.

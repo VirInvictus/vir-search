@@ -17,6 +17,7 @@ use crate::parse::{ParseResult, parse};
 /// is dropped from hashing by design, so such a query bypasses the cache in
 /// both directions (it is never stored, hence never served). The cost is one
 /// [`Expr::contains_real`](crate::Expr::contains_real) walk per miss.
+#[derive(Debug)]
 pub struct QueryCache<F, S, K> {
     capacity: usize,
     entries: HashMap<String, ParseResult<F, S, K>>,
