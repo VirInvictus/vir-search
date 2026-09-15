@@ -1,6 +1,8 @@
 //! The recursive-descent parser: tokens in, a typed [`Expr`] out, never an
-//! error. Every degradation is local and reported twice (flat warning plus
-//! byte-spanned diagnostic).
+//! error. Degradations are local, and nearly all are reported twice (flat
+//! warning plus byte-spanned diagnostic); two boundaries: the
+//! resolver-less `vl:` fallback degrades silently (spec 2.3), and the log
+//! itself is capped with a suppressed-count summary.
 
 use std::collections::HashMap;
 
@@ -32,6 +34,13 @@ pub struct ParseResult<F, S, K> {
 
 /// A degradation worth underlining: what went wrong and which bytes of the
 /// input are responsible.
+///
+/// Spans index the text whose parse produced them. For a sub-parse merged
+/// through [`parse_with_resolver`], that is the PERSPECTIVE's stored text,
+/// not the outer query: a merged span can reference bytes beyond the outer
+/// input's length. A consumer slicing by span must know which text a
+/// diagnostic belongs to; remapping into outer coordinates rides the
+/// future diagnostic-ergonomics lane.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
     /// What went wrong, phrased like its sibling warning in `warnings`.
@@ -57,6 +66,8 @@ const MAX_DEPTH: usize = 128;
 /// `Display`, and `visit`, so a pathological run (`"!"*100000`) must not
 /// become a chain that deep. Extras are dropped with parity preserved: `Not`
 /// is involutive, so the capped chain negates exactly when the input did.
+/// The kept count rounds up to an odd number when a capped odd run must
+/// stay negated, so at most `MAX_NEGATIONS + 1` marks remain (65 here).
 const MAX_NEGATIONS: usize = 64;
 
 /// Degradations one parse records in full. Pathological input (`"("*50000`)
@@ -71,8 +82,10 @@ const MAX_RECORDED: usize = 100;
 const MAX_DUPLICATES: usize = 3;
 
 /// Expands `vl:name` perspectives for [`parse_with_resolver`]. Returning
-/// `None` degrades the node to `Expr::Empty` with a warning; `()` is a
-/// built-in resolver that always answers `None` (used by plain [`parse`]).
+/// `None` degrades the node to `Expr::Empty` with a warning. `()` is a
+/// built-in resolver that always answers `None`, so every perspective
+/// degrades that way; plain [`parse`] attaches no resolver at all, and its
+/// `vl:name` degrades silently to the literal text node (spec 2.3).
 pub trait PerspectiveResolver<F, S> {
     /// The named perspective's stored query text, if it exists.
     fn expression(&self, name: &str) -> Option<String>;
@@ -91,7 +104,10 @@ pub fn parse<F: ParseField, S: ParseState, K: ParseSort>(input: &str) -> ParseRe
 }
 
 /// Like [`parse`], with a resolver that expands `vl:name` perspective
-/// references (cycle-guarded, depth-bounded).
+/// references (cycle-guarded, depth-bounded). The sub-parse's warnings,
+/// diagnostics, and sorts merge into the outer result; note the merged
+/// sub-diagnostics keep the perspective's stored text as their coordinate
+/// system (see [`Diagnostic`]).
 pub fn parse_with_resolver<
     F: ParseField,
     S: ParseState,

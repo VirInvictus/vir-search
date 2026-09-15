@@ -8,10 +8,10 @@
 
 use crate::fold::fold;
 
-/// Length-aware fuzzy threshold: a needle of 1-4 characters tolerates one
-/// edit, 5-7 tolerate two, longer tolerate three — so multi-character words
-/// like "strawberry" survive a missed letter or two without throwing the user
-/// back to substring.
+/// Length-aware fuzzy threshold: a needle of up to four characters tolerates
+/// one edit, five to seven tolerate two, longer tolerate three, so
+/// multi-character words like "strawberry" survive a missed letter or two
+/// without throwing the user back to substring.
 pub fn threshold(needle_len: usize) -> usize {
     match needle_len {
         0..=4 => 1,

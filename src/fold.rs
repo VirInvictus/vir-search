@@ -1,9 +1,13 @@
 //! Accent-folding for search matching.
 //!
 //! `fold` removes diacritics and lowercases, so `Björk` and `bjork` match. It
-//! mirrors SQLite FTS5's `unicode61 remove_diacritics 2` on the in-memory eval
-//! side, which keeps the all-or-nothing dual path consistent: bare text folds on
-//! the SQL path (the FTS tokenizer) and here (this function).
+//! strips the combining-mark range U+0300-036F after NFD decomposition: the
+//! Latin and Greek diacritics. That tracks the SQL side of the consumers'
+//! dual path, SQLite FTS5's `unicode61 remove_diacritics 2`, for Latin text
+//! (verified against FTS5 directly, 2026-09-15): FTS5's own table is
+//! narrower in a few corners (a Cyrillic й keeps its breve on the SQL side,
+//! this function strips it), and neither side strips Hebrew niqqud or
+//! Arabic harakat, which NFD does not decompose.
 //!
 //! This is deliberately narrower than a dedup normalizer: those also fold
 //! quote/dash punctuation and collapse whitespace, while search folding only
@@ -51,7 +55,7 @@ mod tests {
 
     #[test]
     fn preserves_token_boundaries() {
-        // Unlike dedup's norm_key, whitespace runs are not collapsed here.
+        // Unlike a dedup normalizer, whitespace runs are not collapsed here.
         assert_eq!(fold("a  b"), "a  b");
     }
 }

@@ -1,8 +1,7 @@
 //! Tokenizer. Best-effort: it never fails, so the parser can decide
 //! how to degrade malformed input.
 
-/// A lexical token. Best-effort: nothing here fails, so the parser decides
-/// how to degrade malformed input.
+/// A lexical token.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
     /// A bareword (may contain `.`, `-`, digits, unicode).

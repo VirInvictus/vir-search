@@ -30,8 +30,10 @@ pub fn collect_text_terms<F: ParseField, S: ParseState>(expr: &Expr<F, S>) -> Ve
 fn walk<F: ParseField, S: ParseState>(expr: &Expr<F, S>, out: &mut Vec<String>) {
     match expr {
         Expr::Text(s) if !s.is_empty() => out.push(s.clone()),
-        // Negated subtrees stay out: `NOT ambient` is not a positive FTS term.
         Expr::And(items) | Expr::Or(items) => items.iter().for_each(|e| walk(e, out)),
+        // Everything else stays out, negated subtrees included (`NOT ambient`
+        // is not a positive FTS term); fielded constraints are the consumer's
+        // to harvest from the tree itself.
         _ => {}
     }
 }

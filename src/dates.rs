@@ -67,8 +67,8 @@ pub fn resolve_range(spec: &DateSpec, today: NaiveDate) -> (i64, i64) {
 }
 
 /// Does `value` (epoch seconds) satisfy `comp` against the `[start, end)` range?
-/// Precision-aware, matching CalibreQuarry: `=today` is "within today",
-/// `>today` is "strictly after today", `>=today` is "today or later", etc.
+/// Precision-aware: `=today` is "within today", `>today` is "strictly after
+/// today", `>=today` is "today or later", and so on.
 pub fn matches(comp: Comparator, value: i64, start: i64, end: i64) -> bool {
     match comp {
         Comparator::Eq => value >= start && value < end,
@@ -111,6 +111,7 @@ fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(y, m, 1).unwrap_or_else(|| NaiveDate::from_ymd_opt(1970, 1, 1).unwrap())
 }
 
+/// First of the month after `first` (which is itself a first-of-month).
 fn add_month(first: NaiveDate) -> NaiveDate {
     let (y, m) = if first.month() == 12 {
         (first.year() + 1, 1)
@@ -134,8 +135,8 @@ fn start_epoch(date: NaiveDate) -> i64 {
     date.and_time(NaiveTime::MIN).and_utc().timestamp()
 }
 
-/// `Utc::now` is unavailable in some contexts; the caller passes `today`.
-/// Convenience for consumers that just want today's date.
+/// Today's date in UTC, the convenience answer to "what do I pass as
+/// `today`?" for consumers resolving against the current day.
 pub fn today_utc() -> NaiveDate {
     Utc::now().date_naive()
 }
