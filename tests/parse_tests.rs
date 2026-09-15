@@ -704,6 +704,44 @@ fn in_matcher_takes_a_comma_list() {
 }
 
 #[test]
+fn quoted_list_body_stays_literal_text() {
+    // Decided 2026-09-15: a quoted body after `(` is literal text, never
+    // list syntax (the quoted-is-literal rule); the whole visible fragment
+    // degrades with a warning. `genre:("rock,jazz")` used to parse as
+    // In(["rock","jazz"]), contradicting the documented rule, and a
+    // multi-word body broke Display round-trip outright.
+    for input in ["genre:(\"rock,jazz\")", "genre:(\"hip hop,ambient\")"] {
+        let p = parse::<TestField, TestState, TestSort>(input);
+        let body = input
+            .trim_start_matches("genre:(\"")
+            .trim_end_matches("\")")
+            .to_string();
+        assert_eq!(
+            p.expr,
+            Expr::Text(format!("genre:({body})")),
+            "{input} must degrade to its visible fragment"
+        );
+        assert!(
+            p.warnings.iter().any(|w| w.contains("quoted list")),
+            "{input} must warn"
+        );
+        // The degraded text node round-trips: it renders fully quoted, and a
+        // quoted term is literal, so the re-parse lands on the same node
+        // instead of the malformed re-parse the old Display produced.
+        round_trip(input);
+    }
+    // The unquoted list is untouched.
+    let p = parse::<TestField, TestState, TestSort>("genre:(rock,jazz)");
+    assert_eq!(
+        p.expr,
+        Expr::Field {
+            field: TestField::Genre,
+            kind: MatchKind::In(vec!["rock".into(), "jazz".into()]),
+        }
+    );
+}
+
+#[test]
 fn duration_values_parse_for_real_fields() {
     let p = parse::<TestField, TestState, TestSort>("duration:>=1h30m");
     assert_eq!(

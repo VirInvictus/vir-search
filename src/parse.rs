@@ -481,6 +481,20 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
             // bareword); a quoted value is literal, never a list.
             Some(Token::LParen) => {
                 self.pos += 1;
+                if matches!(self.peek(), Some(Token::Quoted(_))) {
+                    // A quoted list body stays literal (decided 2026-09-15):
+                    // the quotes never become list syntax, so the whole
+                    // visible fragment degrades to text with a warning.
+                    let body = self.value_string().unwrap_or_default();
+                    if self.peek() == Some(&Token::RParen) {
+                        self.pos += 1;
+                    }
+                    self.warn_spanned(
+                        format!("quoted list for {field}:(...); matching as text"),
+                        field_span,
+                    );
+                    return text_or_empty(format!("{field}:({body})"));
+                }
                 match self.value_string() {
                     Some(word) if self.peek() == Some(&Token::RParen) => {
                         self.pos += 1;
