@@ -16,15 +16,18 @@ The library exposes the following core entrypoint:
 ### 2.1 AST Nodes
 - `Empty`: Identity node for empty input or degraded cycles.
 - `Text(String)`: Bare free text, matched via FTS or substring.
-- `Field(F, MatchKind)`: A direct metadata field constraint.
-- `Compare(F, Comparator, Value)`: A relational constraint (e.g., `rating:>=4`).
-- `Range(F, Value, Value)`: A bounded range (e.g., `year:2020..2023`).
+- `Field { field: F, kind: MatchKind }`: A direct metadata field constraint.
+- `Compare { field: F, comp: Comparator, value: Value }`: A relational constraint (e.g., `rating:>=4`).
+- `Range { field: F, low: Value, high: Value }`: A bounded range (e.g., `year:2020..2023`).
 - `State(S)`: A boolean binary state (e.g., `is:read`).
 - Logic: `Not(Box<Expr>)`, `And(Vec<Expr>)`, `Or(Vec<Expr>)`.
 
+Variants carry named fields as written above (not tuple notation); the
+rustdoc is the compile-checked reference for match-arm shapes.
+
 ### 2.2 Traits
 Consumers must implement:
-- `ParseField`: Provides name resolution and crucially `field_type()` to distinguish parsing paths (String, Int, Real, Date).
+- `ParseField`: Provides name resolution and, decisively, `field_type()` to distinguish parsing paths (String, Int, Real, Date).
 - `ParseState`: Resolves `is:*` boolean states.
 - `ParseSort`: Resolves `sort:*` directives extracted during parsing.
 
@@ -35,21 +38,26 @@ named perspective's stored query text (or `None`). Expansion semantics:
 - No resolver attached (plain `parse`): `vl:name` degrades to the literal text node `vl:name`.
 - Unknown name: the node degrades to `Expr::Empty` with a warning and a spanned diagnostic on the name.
 - A cycle (`vl:a` -> `vl:b` -> `vl:a`) is cut at the first repeat: the node degrades to `Expr::Empty` with a "perspective cycle" warning. Each expansion branch tracks its own ancestor chain, so a diamond (`a` referencing `b` and `c`, both referencing `d`) is fine.
-- The sub-parse is full-fidelity: its warnings, diagnostics, and extracted `sort:` directives merge into the outer `ParseResult`.
+- The sub-parse is full-fidelity: its warnings, diagnostics, and extracted `sort:` directives merge into the outer `ParseResult`. Merged sub-diagnostics keep the perspective's stored text as their coordinate system: a span can reference bytes beyond the outer query's length, so a consumer slicing by span must know which text a diagnostic belongs to (remapping into outer coordinates rides the future diagnostic-ergonomics lane).
 
 ## 3. Fallback and Degradation Policies
 
 The parser enforces a strict "never fail" policy, structurally: there is no
 error channel in the parse path, so a partial query can never take the whole
-query down with it. Every degradation is also reported twice: as a string in
+query down with it. Nearly every degradation is reported twice: as a string in
 `ParseResult.warnings` and as a `Diagnostic { message, start, end }` in
-`ParseResult.diagnostics`, carrying the byte span a UI should underline.
+`ParseResult.diagnostics`, carrying the byte span a UI should underline. Two
+boundaries: the resolver-less `vl:` fallback degrades silently (§2.3), and
+both lists are bounded (at most 100 recorded entries, at most 3 copies of one
+identical message); anything suppressed is counted in a tail "and N more
+degradations suppressed" entry whose span is `0..0`.
 - If a token resembles a field syntax (`unknown:value`) but the domain's `ParseField` implementation returns `None`, the parser emits a warning in the `ParseResult` and degrades the node to `Expr::Text("unknown:value")`.
 - A trailing logical operator (`foo AND`), a missing value (`genre:`, `title:=`), or EOF mid-expression degrades locally: what already parsed stands, the broken fragment becomes a visible text node carrying the partial expression, and a warning is recorded.
 - Unbalanced parentheses keep the successfully parsed content and record a warning, rather than flattening the input into one text node.
 - Standalone punctuation degrades to a text node of its literal form (`?`, `!=`, `..`). A stray `)` reads as nothing, but it is consumed with a warning and the parser keeps collecting: a top-level closer must not silently discard the rest of the query.
-- Recursion is bounded (1.4.2): parentheses and chained `vl:` expansions share a fixed depth budget, and a `(` past the budget degrades to its literal text with a spanned warning; a run of more than 64 consecutive negation marks wraps at the cap with parity preserved, dropping the redundant marks with a warning. Pathological input therefore parses to a shallow, warning-carrying tree instead of overflowing the stack in the parse or in the later `Drop`/`Display`/`visit` walks.
-- A quoted value is literal text: `genre:"true"` is a substring match, never the boolean presence check that the unquoted `genre:true` means. A relational comparator on a text field (`author:>=Sanderson`) degrades to its visible text form rather than dropping the query.
+- Recursion is bounded (1.4.2): parentheses and chained `vl:` expansions share a fixed depth budget, and a `(` past the budget degrades to its literal text with a spanned warning; a run of more than 64 consecutive negation marks wraps at the cap, rounding up to an odd count when parity demands, so at most 65 marks remain and the capped chain negates exactly when the full run would have. Pathological input therefore parses to a shallow, warning-carrying tree instead of overflowing the stack in the parse or in the later `Drop`/`Display`/`visit` walks.
+- A quoted value is literal text: `genre:"true"` is a substring match, never the boolean presence check that the unquoted `genre:true` means, and a quoted In-list body (`genre:("rock,jazz")`) is literal text with a warning, never list syntax (decided 2026-09-15). A relational comparator on a text field (`author:>=Sanderson`) degrades to its visible text form rather than dropping the query.
+- A calendar date whose year falls outside 0..=9999 (`added:262143`) degrades to visible text with a warning (decided 2026-09-15) instead of parsing into a `DateSpec` whose resolution would silently fall back to 1970 and invert a range.
 - Wildcard and list matchers on text fields: `field:base*` (Prefix), `field:*base` (Suffix), `field:(a,b)` (In). Unquoted single-word values only; a quoted value is literal text and never intercepted by wildcards or boolean presence checks.
 - The lexer handles quotes, backslash escapes (`\"`, `\\`), and unicode safely without panicking; `Display` escapes backslashes before quotes so rendering round-trips.
 
@@ -57,7 +65,7 @@ query down with it. Every degradation is also reported twice: as a string in
 
 The library provides `blend_relevance`, a mathematical heuristic combining a `bm25` Full-Text Search score with an exponential recency decay. It also provides `collect_text_terms`, which traverses the generic AST to harvest bare-text components, skipping negated subtrees (`NOT x` is not a positive term). Consumers use these extracted strings to supply their underlying SQLite FTS queries while bypassing the strictly fielded constraints.
 
-The `fuzzy` module centralizes the shared fuzzy matcher: `damerau_levenshtein` (optimal string alignment), `within` (the bounded, early-exiting predicate), `threshold` (length-aware bands: 1-4 characters tolerate one edit, 5-7 two, longer three), and `hit` (accent-folded, whole-candidate-or-any-word). It ships no evaluation; consumers call it from their own field matching.
+The `fuzzy` module centralizes the shared fuzzy matcher: `damerau_levenshtein` (optimal string alignment), `within` (the bounded, early-exiting predicate), `threshold` (length-aware bands: up to 4 characters tolerate one edit, 5-7 two, longer three), and `hit` (accent-folded, whole-candidate-or-any-word). It ships no evaluation; consumers call it from their own field matching.
 
 ## 5. Hashing and the Query Cache
 

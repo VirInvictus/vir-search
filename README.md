@@ -2,7 +2,7 @@
 
 A domain-agnostic Rust library for parsing Calibre-style search expressions into a typed Abstract Syntax Tree (AST).
 
-Extracted from `atrium-search` and `conservatory-search`, `vir-search` provides the lexer, generic recursive-descent parser, ranking heuristics, and date-range resolvers that underpin the VirInvictus ecosystem. By parameterizing the AST over the consumer's `Field`, `State`, and `SortKey` types, it avoids domain-coupling while maintaining a unified, powerful search grammar across the entire suite of desktop applications.
+Extracted from `atrium-search` and `conservatory-search`, `vir-search` provides the lexer, generic recursive-descent parser, ranking heuristics, and date-range resolvers that underpin the VirInvictus ecosystem. By parameterizing the AST over the consumer's `Field`, `State`, and `SortKey` types, it avoids domain-coupling while keeping one search grammar across the desktop suite.
 
 ## Architecture and Scope
 
@@ -10,7 +10,7 @@ The library is explicitly designed to handle the parsing stage of a query pipeli
 
 ### The Parser (`vir_search::parse`)
 
-The core parser uses recursive descent to produce an AST. It is designed around a **"never fail"** philosophy: syntax errors, unrecognized fields, or malformed constraints do not panic or return hard errors. Instead, they gracefully degrade into raw text-matching nodes. This ensures that users can always fall back to standard full-text search behavior even if they type something the parser doesn't natively understand.
+The core parser uses recursive descent to produce an AST. It is designed around a **"never fail"** philosophy: syntax errors, unrecognized fields, or malformed constraints do not panic or return hard errors. Instead, they degrade locally and visibly into raw text-matching nodes. This ensures that users can always fall back to standard full-text search behavior even if they type something the parser doesn't natively understand.
 
 ### The Grammar (normative)
 
@@ -23,27 +23,28 @@ The core parser uses recursive descent to produce an AST. It is designed around 
 | Regex | `title:~^Live` | `Field` with `MatchKind::Regex` (applied consumer-side) |
 | Fuzzy | `title:?stromlite` | `Field` with `MatchKind::Fuzzy`: Damerau-Levenshtein with a length-aware threshold, accent-folded (the shared `fuzzy` module) |
 | Prefix / suffix | `title:foo*`, `author:*bar` | `Field` with `MatchKind::Prefix` / `Suffix` (unquoted single-word values only) |
-| In-list | `genre:(rock,jazz)` | `Field` with `MatchKind::In`: an OR over the members; no spaces inside the list |
+| Juxtaposition | `author:x title:y` | implicit `AND`: adjacent terms conjoin, no operator needed |
+| In-list | `genre:(rock,jazz)` | `Field` with `MatchKind::In`: an OR over the members; no spaces inside the list, and a quoted body stays literal text (never list syntax) |
 | Presence | `genre:true` / `genre:false` | `Field` with `MatchKind::HasAny` / `HasNone` (quoted forms stay literal substring) |
 | Relational | `rating:>=4`, `duration:<600` | `Compare` on `Int`/`Real`/`Date` fields; on a text field the fragment degrades to visible text |
 | Range | `year:2020..2023` | `Range` (low inclusive, high exclusive) |
-| Date keywords | `added:today`, `yesterday`, `tomorrow`, `thisweek`, `lastweek`, `nextweek`, `thismonth`, `lastmonth`, `nextmonth`, `thisyear` | `Compare` with the symbolic `DateSpec` |
+| Date keywords | `added:today`, `added:yesterday`, `added:tomorrow`, `added:thisweek`, `added:lastweek`, `added:nextweek`, `added:thismonth`, `added:lastmonth`, `added:nextmonth`, `added:thisyear` | `Compare` with the symbolic `DateSpec` (bare keywords without a field parse as free text) |
 | Relative dates | `added:3daysago`, `added:in7days`, `added:+7d`, `added:-14d` | `Compare` with `DateSpec::DaysAgo(n)` / `InDays(n)` |
 | Calendar dates | `added:2024`, `added:2024-06`, `added:2024-06-08` | `Compare` with `DateSpec::Ymd` |
 | Durations | `duration:1h30m`, `duration:90m`, `duration:2d12h` | `Value::Real` seconds on `Real` fields |
-| Magnitudes | `size:320k`, `size:<50mb` | `Value::Real` scaled (`k`/`mb`/`gb`) |
+| Magnitudes | `size:320k`, `size:<50mb` | `Value::Real` scaled (`k`/`kb`/`mb`/`gb`) |
 | State | `is:finished` | `State` (the consumer's `ParseState`) |
-| Sort | `sort:-added` | Extracted into `ParseResult.sorts`; the node itself is empty |
+| Sort | `sort:-added`, `sort:+added` | Extracted into `ParseResult.sorts`; the node itself is empty (`-` descending, `+` or bare ascending) |
 | Perspective | `vl:reading` | Expanded through the consumer's resolver (`parse_with_resolver`) |
 | Logic | `a AND b`, `a OR b`, `NOT a`, `!a`, `( ... )` | `And` / `Or` / `Not`; doubled negation parses |
 
 Date tokens never resolve at parse time: they stay symbolic `DateSpec` values, and `dates::resolve_range(spec, today)` turns one into a concrete `[start, end)` epoch-seconds (UTC) window whenever the consumer asks, so a stored query never bakes in a timestamp. Resolution saturates at the representable date edges, so an absurd offset (`added:4294967295daysago`) clamps instead of panicking.
 
-Degradation is local and visible: a quoted value is always literal text (`genre:"true"` is a substring match, not the `genre:true` presence check), a trailing operator or missing value keeps what already parsed, a stray `)` is consumed with a warning while the rest of the query keeps parsing, and recursion is bounded (a pathologically deep fragment degrades to text instead of overflowing the stack). Every degraded fragment records a warning in `ParseResult.warnings` plus a byte-spanned entry in `ParseResult.diagnostics`, so a UI can underline the exact broken fragment.
+Degradation is local and visible: a quoted value is always literal text (`genre:"true"` is a substring match, not the `genre:true` presence check; a quoted In-list body stays literal too rather than becoming list syntax), a trailing operator or missing value keeps what already parsed, a stray `)` is consumed with a warning while the rest of the query keeps parsing, and recursion is bounded (a pathologically deep fragment degrades to text instead of overflowing the stack). A `Y..` calendar year outside 0..=9999 degrades with a warning instead of resolving through a fallback that would silently invert a range. Every degraded fragment records a warning in `ParseResult.warnings` plus a byte-spanned entry in `ParseResult.diagnostics`, so a UI can underline the exact broken fragment; the log is bounded, with a tail entry counting anything suppressed.
 
 ## Usage
 
-To use `vir-search`, you must implement `ParseField`, `ParseState`, and `ParseSort` on your domain enums. Crucially, your `ParseField` implementation must return a `FieldType` so the parser knows whether to attempt numeric/date parsing or fall back to strings.
+To use `vir-search`, you must implement `ParseField`, `ParseState`, and `ParseSort` on your domain enums. Your `ParseField` implementation must return a `FieldType` so the parser knows whether to attempt numeric/date parsing or fall back to strings. A complete compile-checked minimal consumer lives in `examples/mini_consumer.rs`.
 
 ```rust
 use vir_search::parse::parse;
