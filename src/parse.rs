@@ -4,6 +4,7 @@
 
 use crate::ast::{
     Comparator, DateSpec, Expr, MatchKind, ParseField, ParseSort, ParseState, SortSpec, Value,
+    bool_word,
 };
 use crate::lex::{Spanned, Token, lex_with_spans};
 
@@ -662,14 +663,6 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
         self.diagnostics.extend(sub.diagnostics);
         self.sorts.extend(sub.sorts);
         sub.expr
-    }
-}
-
-fn bool_word(w: &str) -> Option<bool> {
-    match w.to_ascii_lowercase().as_str() {
-        "true" => Some(true),
-        "false" => Some(false),
-        _ => None,
     }
 }
 

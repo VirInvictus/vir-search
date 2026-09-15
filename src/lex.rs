@@ -49,9 +49,10 @@ pub struct Spanned {
     pub end: usize,
 }
 
-/// Characters that always terminate a bareword. Kept in sync with the quoting
-/// check in `ast::quote_if_needed` or round-tripping breaks.
-fn is_boundary(c: char) -> bool {
+/// Characters that always terminate a bareword. The single source of truth,
+/// shared with `ast::quote_if_needed`: a rendered value containing one of
+/// these must be quoted or re-lexing would mis-split it.
+pub(crate) fn is_boundary(c: char) -> bool {
     c.is_whitespace() || matches!(c, '(' | ')' | ':' | '"' | '~' | '?' | '!' | '<' | '>' | '=')
 }
 

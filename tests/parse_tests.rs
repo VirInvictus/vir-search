@@ -151,6 +151,11 @@ fn round_trips() {
         "title:\"a..b\"",
         "\"or\" boards",
         "\"not\"",
+        "genre:\"true\"",
+        "genre:\"false\"",
+        "genre:\"TRUE\"",
+        "genre:\"ambient*\"",
+        "genre:\"*metal\"",
         "added:tomorrow",
         "added:lastweek",
         "added:nextweek",
@@ -293,6 +298,43 @@ fn quoted_bool_word_is_substring_not_presence() {
             kind: MatchKind::HasAny,
         }
     );
+}
+
+#[test]
+fn quoted_grammar_words_round_trip_as_substring() {
+    // The 1.0.4 literal rule: a quoted value is a substring match, never the
+    // presence or wildcard check the bare form means. Display used to render
+    // these unquoted (`genre:"true"` -> `genre:true`), and the bare form
+    // re-parses to HasAny/HasNone/Prefix/Suffix: a round-trip that flipped
+    // meaning, so the corpus alone is not enough here; each case asserts the
+    // semantics end to end.
+    for (input, body) in [
+        ("genre:\"true\"", "true"),
+        ("genre:\"false\"", "false"),
+        ("genre:\"TRUE\"", "TRUE"),
+        ("genre:\"ambient*\"", "ambient*"),
+        ("genre:\"*metal\"", "*metal"),
+    ] {
+        let first = parse::<TestField, TestState, TestSort>(input);
+        assert_eq!(
+            first.expr,
+            Expr::Field {
+                field: TestField::Genre,
+                kind: MatchKind::Substring(body.into()),
+            },
+            "{input} must stay a literal substring"
+        );
+        let rendered = format!("{}", first.expr);
+        assert!(
+            rendered.contains('"'),
+            "{input} must render quoted, got {rendered:?}"
+        );
+        assert_eq!(
+            parse::<TestField, TestState, TestSort>(&rendered).expr,
+            first.expr,
+            "the rendered form must re-parse to the same node"
+        );
+    }
 }
 
 #[test]

@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use crate::lex::is_boundary;
+
 /// The value grammar a field's values parse under.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldType {
@@ -394,23 +396,44 @@ fn paren<F: ParseField, S: ParseState>(expr: &Expr<F, S>) -> String {
 }
 
 /// Quote a rendered term when re-lexing it bare would mis-split (whitespace,
-/// operators, reserved words), escaping backslashes and quotes so `Display`
-/// round-trips.
+/// operators, reserved words) or would be intercepted by the field-value
+/// grammar (presence checks, wildcards), escaping backslashes and quotes so
+/// `Display` round-trips. The interception cases here mirror the parser's
+/// unquoted-value arms exactly: a quoted value that this function quotes
+/// always re-parses to the same node it rendered from.
 pub fn quote_if_needed(s: &str) -> String {
-    let boundary = |c: char| {
-        c.is_whitespace() || matches!(c, '(' | ')' | ':' | '"' | '~' | '?' | '!' | '<' | '>' | '=')
-    };
     let needs = s.is_empty()
-        || s.chars().any(boundary)
+        || s.chars().any(is_boundary)
         || s.contains("..")
         || s.eq_ignore_ascii_case("and")
         || s.eq_ignore_ascii_case("or")
-        || s.eq_ignore_ascii_case("not");
+        || s.eq_ignore_ascii_case("not")
+        || bool_word(s).is_some()
+        || wildcard_intercepted(s);
     if needs {
         // Backslash first, so an escaped quote's own backslash is not doubled.
         let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
         format!("\"{escaped}\"")
     } else {
         s.to_string()
+    }
+}
+
+/// Would a bareword value be intercepted by the prefix/suffix wildcard arms
+/// (`foo*`, `*bar`)? The same shape the parser honors: one star on one end,
+/// a non-empty base without another star.
+fn wildcard_intercepted(s: &str) -> bool {
+    let one_end_star = |base: &str| !base.is_empty() && !base.contains('*');
+    s.strip_suffix('*').is_some_and(one_end_star) || s.strip_prefix('*').is_some_and(one_end_star)
+}
+
+/// Is `w` a presence-check word (`true` / `false`, any case)? Shared by the
+/// parser's unquoted-value arms and by [`quote_if_needed`], which must quote
+/// exactly the words the parser would otherwise intercept.
+pub(crate) fn bool_word(w: &str) -> Option<bool> {
+    match w.to_ascii_lowercase().as_str() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
     }
 }
