@@ -1,5 +1,7 @@
 # vir-search
 
+[![CI](https://github.com/VirInvictus/vir-search/actions/workflows/ci.yml/badge.svg)](https://github.com/VirInvictus/vir-search/actions/workflows/ci.yml)
+
 A domain-agnostic Rust library for parsing Calibre-style search expressions into a typed Abstract Syntax Tree (AST).
 
 Extracted from `atrium-search` and `conservatory-search`, `vir-search` provides the lexer, generic recursive-descent parser, ranking heuristics, and date-range resolvers that underpin the VirInvictus ecosystem. By parameterizing the AST over the consumer's `Field`, `State`, and `SortKey` types, it avoids domain-coupling while keeping one search grammar across the desktop suite.
