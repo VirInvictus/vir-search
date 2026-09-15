@@ -410,12 +410,22 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
                                 }
                             }
                             None => {
+                                // The whole visible fragment becomes one text
+                                // node: a comparator before the value comes
+                                // along too, so `bogus:>=5` degrades to
+                                // `bogus:>=5` rather than splitting into
+                                // three fragments the reader must reassemble.
+                                let prefix = self
+                                    .eat_comparator()
+                                    .map(|c| c.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
                                 let remainder = self.value_string().unwrap_or_default();
                                 self.warn_spanned(
                                     format!("unknown field {w_clone:?}; matching as text"),
                                     t_span,
                                 );
-                                text_or_empty(format!("{w_clone}:{remainder}"))
+                                text_or_empty(format!("{w_clone}:{prefix}{remainder}"))
                             }
                         },
                     }

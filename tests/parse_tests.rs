@@ -190,6 +190,12 @@ fn unknown_field_degrades_to_text() {
     let p = parse::<TestField, TestState, TestSort>("bogus:value");
     assert_eq!(p.expr, Expr::Text("bogus:value".into()));
     assert!(!p.warnings.is_empty());
+    // A comparator rides along: one visible fragment, not three text nodes
+    // the reader would have to reassemble.
+    let p = parse::<TestField, TestState, TestSort>("bogus:>=5");
+    assert_eq!(p.expr, Expr::Text("bogus:>=5".into()));
+    assert!(!p.warnings.is_empty());
+    round_trip("bogus:>=5");
 }
 
 #[test]
