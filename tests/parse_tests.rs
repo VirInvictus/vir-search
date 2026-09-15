@@ -156,6 +156,9 @@ fn round_trips() {
         "genre:\"TRUE\"",
         "genre:\"ambient*\"",
         "genre:\"*metal\"",
+        "(genre:ambient genre:jazz) (rating:>=4 is:starred)",
+        "(genre:ambient OR genre:jazz) OR genre:rock",
+        "genre:\"*metal\"",
         "added:tomorrow",
         "added:lastweek",
         "added:nextweek",
@@ -247,6 +250,29 @@ fn month_keywords_parse() {
         // A clean parse: the keyword is resolved, not degraded with a warning.
         assert!(p.warnings.is_empty(), "{kw} should not warn");
     }
+}
+
+#[test]
+fn negating_a_degraded_empty_operand_stays_empty() {
+    // The round-trip fuzz's first catch: a `!` whose operand degraded to
+    // Empty (a `sort:` directive extracts itself into no node) used to wrap
+    // into Not(Empty), which renders a bare `NOT ` that steals the next
+    // token on re-parse.
+    let p = parse::<TestField, TestState, TestSort>("! sort:-added ambient");
+    assert_eq!(
+        p.expr,
+        parse::<TestField, TestState, TestSort>("ambient").expr,
+        "the vanished operand must not carry a negation onto its neighbor"
+    );
+    assert_eq!(p.sorts.len(), 1, "the sort directive is still extracted");
+    for input in ["! sort:-added ambient", "!", "a AND !"] {
+        round_trip(input);
+    }
+    // Real operands still negate.
+    assert_eq!(
+        parse::<TestField, TestState, TestSort>("NOT genre:ambient").expr,
+        parse::<TestField, TestState, TestSort>("! genre:ambient").expr
+    );
 }
 
 #[test]

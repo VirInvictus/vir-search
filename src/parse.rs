@@ -320,6 +320,13 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
             );
         }
         for _ in 0..wraps {
+            // Negating nothing is nothing: an operand that degraded to Empty
+            // (EOF after the marks, a `sort:` that extracted itself) must not
+            // become Not(Empty), whose Display renders a bare "NOT " that
+            // steals the next token on re-parse.
+            if matches!(expr, Expr::Empty) {
+                break;
+            }
             expr = Expr::Not(Box::new(expr));
         }
         expr

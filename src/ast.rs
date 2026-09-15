@@ -374,9 +374,13 @@ fn write_joined<F: ParseField, S: ParseState>(
         if i > 0 {
             write!(f, " {op} ")?;
         }
+        // A nested combinator parenthesizes whenever the flat form would
+        // re-associate into a different shape: an `And` or `Or` under an
+        // `And`, and an `Or` under an `Or`. A flat `And` under an `Or` is
+        // exact (`a b OR c` re-parses to the same tree; AND binds tighter).
         let needs = match item {
-            Expr::Or(_) if !is_or => true,
-            Expr::And(_) if is_or => false,
+            Expr::Or(_) => true,
+            Expr::And(_) => !is_or,
             _ => false,
         };
         if needs {
