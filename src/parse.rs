@@ -2,6 +2,8 @@
 //! error. Every degradation is local and reported twice (flat warning plus
 //! byte-spanned diagnostic).
 
+use std::collections::HashMap;
+
 use crate::ast::{
     Comparator, DateSpec, Expr, MatchKind, ParseField, ParseSort, ParseState, SortSpec, Value,
     bool_word,
@@ -17,11 +19,14 @@ pub struct ParseResult<F, S, K> {
     pub expr: Expr<F, S>,
     /// Sort directives extracted from `sort:` prefixes, in query order.
     pub sorts: Vec<SortSpec<K>>,
-    /// Every degradation, in order, as plain strings (the flat log).
+    /// Degradations, in order, as plain strings (the flat log). Bounded by
+    /// [`MAX_RECORDED`]: repeated and pathological input cannot flood the
+    /// log, and a tail entry counts what was suppressed.
     pub warnings: Vec<String>,
     /// The warnings that carry a byte span in the input (`start..end`, end
     /// exclusive), for search-bar underlines. Every diagnostic also appears
-    /// in `warnings`.
+    /// in `warnings`, list for list. Bounded like `warnings`; the suppressed
+    /// summary's span is `0..0` (it underlines nothing).
     pub diagnostics: Vec<Diagnostic>,
 }
 
@@ -53,6 +58,17 @@ const MAX_DEPTH: usize = 128;
 /// become a chain that deep. Extras are dropped with parity preserved: `Not`
 /// is involutive, so the capped chain negates exactly when the input did.
 const MAX_NEGATIONS: usize = 64;
+
+/// Degradations one parse records in full. Pathological input (`"("*50000`)
+/// used to emit a near-copy of the same warning per token; past this many
+/// recorded entries further degradations are counted and summarized once
+/// ("and N more suppressed") in both lists.
+const MAX_RECORDED: usize = 100;
+
+/// Copies of one identical message a parse keeps before suppressing the
+/// rest: enough to show a degradation recurs, not enough to flood the log
+/// with a single repeated line.
+const MAX_DUPLICATES: usize = 3;
 
 /// Expands `vl:name` perspectives for [`parse_with_resolver`]. Returning
 /// `None` degrades the node to `Expr::Empty` with a warning; `()` is a
@@ -101,14 +117,18 @@ fn parse_inner<F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolve
         sorts: Vec::new(),
         warnings: Vec::new(),
         diagnostics: Vec::new(),
+        dup_counts: HashMap::new(),
+        suppressed: 0,
         resolver,
         seen: seen.to_vec(),
         depth,
         paren_depth: 0,
         _marker: std::marker::PhantomData,
     };
+    let expr = p.boolean_expr();
+    p.finish_summary();
     ParseResult {
-        expr: p.boolean_expr(),
+        expr,
         sorts: p.sorts,
         warnings: p.warnings,
         diagnostics: p.diagnostics,
@@ -122,6 +142,10 @@ struct Parser<'a, F, S, K, R> {
     sorts: Vec<SortSpec<K>>,
     warnings: Vec<String>,
     diagnostics: Vec<Diagnostic>,
+    /// Copies kept per distinct message, against [`MAX_DUPLICATES`].
+    dup_counts: HashMap<String, usize>,
+    /// Degradations dropped by the caps, summarized once at the end.
+    suppressed: usize,
     resolver: Option<&'a R>,
     seen: Vec<String>,
     /// Recursion budget spent by enclosing groups and `vl:` expansions,
@@ -161,14 +185,41 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
     }
 
     /// Record a degradation in both lists: `warnings` stays the flat string
-    /// log, `diagnostics` carries the span to underline.
+    /// log, `diagnostics` carries the span to underline. The caps in
+    /// [`MAX_RECORDED`]/[`MAX_DUPLICATES`] drop anything past them;
+    /// [`Parser::finish_summary`] closes the log with one count.
     fn warn_spanned(&mut self, message: String, span: (usize, usize)) {
+        let copies = self.dup_counts.entry(message.clone()).or_insert(0);
+        if self.diagnostics.len() >= MAX_RECORDED || *copies >= MAX_DUPLICATES {
+            self.suppressed += 1;
+            return;
+        }
+        *copies += 1;
         self.diagnostics.push(Diagnostic {
             message: message.clone(),
             start: span.0,
             end: span.1,
         });
         self.warnings.push(message);
+    }
+
+    /// Append the suppressed-degradations count to both lists when the caps
+    /// dropped anything, so a reader always sees that the log is partial.
+    fn finish_summary(&mut self) {
+        if self.suppressed == 0 {
+            return;
+        }
+        let message = format!(
+            "and {} more degradation{} suppressed",
+            self.suppressed,
+            if self.suppressed == 1 { "" } else { "s" }
+        );
+        self.warnings.push(message.clone());
+        self.diagnostics.push(Diagnostic {
+            message,
+            start: 0,
+            end: 0,
+        });
     }
 
     fn boolean_expr(&mut self) -> Expr<F, S> {

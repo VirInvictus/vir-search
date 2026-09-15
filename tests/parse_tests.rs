@@ -453,6 +453,35 @@ fn deep_paren_nesting_degrades_instead_of_overflowing() {
 }
 
 #[test]
+fn degradation_logs_are_capped_with_a_suppressed_summary() {
+    // "("*50000 used to emit ~49.8k copies of the same warning.
+    let input = "(".repeat(50_000);
+    let p = parse::<TestField, TestState, TestSort>(&input);
+    assert!(
+        p.warnings.len() <= 101,
+        "the flat log must be bounded, got {}",
+        p.warnings.len()
+    );
+    assert_eq!(
+        p.diagnostics.len(),
+        p.warnings.len(),
+        "the two lists stay paired under the cap"
+    );
+    let summary = p.warnings.last().expect("a summary must close the log");
+    assert!(
+        summary.contains("more degradations suppressed"),
+        "the tail must count the suppressed entries, got {summary:?}"
+    );
+    assert!(
+        p.diagnostics.last().unwrap().message == *summary,
+        "the summary lands in both lists"
+    );
+    // A clean parse has no summary and no entries.
+    let clean = parse::<TestField, TestState, TestSort>("genre:ambient AND rating:>=4");
+    assert!(clean.warnings.is_empty() && clean.diagnostics.is_empty());
+}
+
+#[test]
 fn negation_runs_are_capped_with_parity_kept() {
     use vir_search::ast::Folder;
 
