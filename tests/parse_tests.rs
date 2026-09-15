@@ -656,6 +656,47 @@ fn huge_date_offset_parses_and_resolves_without_panicking() {
 }
 
 #[test]
+fn ymd_years_outside_0_to_9999_degrade_with_a_warning() {
+    // added:262143 used to parse into a DateSpec resolve_range could not
+    // order: the 1970 fallback inverted the range silently
+    // (`added:<262143` matched everything). The parser now rejects the
+    // year at parse time (decided 2026-09-15: valid range 0..=9999), so
+    // the query degrades to visible text with a warning instead.
+    for input in ["added:262143", "added:99999-06-08", "added:-50"] {
+        let p = parse::<TestField, TestState, TestSort>(input);
+        assert_eq!(
+            p.expr,
+            Expr::Text((*input).into()),
+            "{input} must degrade to visible text"
+        );
+        assert!(
+            p.warnings
+                .iter()
+                .any(|w| w.contains("bad numeric/date value")),
+            "{input} must warn"
+        );
+        round_trip(input);
+    }
+    // The whole valid edge stays parseable and orderable, including the
+    // year+1 arithmetic the resolution arms perform.
+    use vir_search::dates::{resolve_range, today_utc};
+    let p = parse::<TestField, TestState, TestSort>("added:9999-12-31");
+    assert_eq!(
+        p.expr,
+        Expr::Compare {
+            field: TestField::Added,
+            comp: Comparator::Eq,
+            value: Value::Date(DateSpec::Ymd(9999, Some(12), Some(31))),
+        }
+    );
+    let (start, end) = resolve_range(&DateSpec::Ymd(9999, Some(12), Some(31)), today_utc());
+    assert!(start < end, "the top of the valid range must stay ordered");
+    round_trip("added:2024");
+    round_trip("added:2024-06");
+    round_trip("added:2024-06-08");
+}
+
+#[test]
 fn wildcard_matchers() {
     let p = parse::<TestField, TestState, TestSort>("genre:ambient*");
     assert_eq!(

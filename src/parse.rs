@@ -732,6 +732,14 @@ fn parse_date_spec(raw: &str) -> Option<DateSpec> {
     }
     let mut parts = s.split('-');
     let year: i32 = parts.next()?.parse().ok()?;
+    // Years outside 0..=9999 degrade (decided 2026-09-15): resolve_range
+    // clamps unrepresentable dates to a 1970 fallback, which silently
+    // inverts a range (`added:<262143` matching everything), and Display
+    // formats a four-digit year. Rejecting here turns the silent lie into
+    // the visible bad-value degradation.
+    if !(0..=9999).contains(&year) {
+        return None;
+    }
     let month = match parts.next() {
         Some(m) => Some(m.parse::<u32>().ok().filter(|m| (1..=12).contains(m))?),
         None => None,
