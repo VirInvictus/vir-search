@@ -1,5 +1,70 @@
 # vir-search Patch Notes
 
+## v1.4.3 (2026-09-15)
+
+**The final-audit hop.** The Display/round-trip contract's semantic holes
+close, the dead regex dependency goes, and a generated-input fuzz now
+guards the bug class that shipped twice.
+
+*   **`genre:"true"` renders quoted (MEDIUM).** `quote_if_needed` did not
+    quote values the grammar intercepts bare, so a quoted-bool or quoted
+    wildcard (`genre:"true"`, `genre:"ambient*"`) displayed bare and
+    re-parsed to `HasAny`/`HasNone`/`Prefix`/`Suffix`: a round-trip that
+    flipped meaning, the same class as 1.4.1's month-keyword gap. The
+    boundary predicate and `bool_word` are now single shared helpers, and
+    the semantic assertions cover the cases end to end.
+*   **A quoted In-list body is literal text (MEDIUM, decided 2026-09-15).**
+    `genre:("rock,jazz")` parsed as an `In` matcher, contradicting the four
+    "quoted is always literal" doc statements, and a multi-word body broke
+    Display round-trip outright. Rejected over documenting the form: the
+    quotes never become list syntax, so the visible fragment degrades to
+    text with a warning; the unquoted list is untouched.
+*   **Ymd years outside 0..=9999 degrade at parse (decided 2026-09-15).**
+    `added:262143` parsed into a `DateSpec` whose resolution silently fell
+    back to 1970, inverting ranges warning-free. The year is validated at
+    parse; out-of-range degrades to visible text with the bad-value warning.
+*   **Two more shape-stability holes, caught by the new fuzz on its first
+    run.** A negation whose operand degraded to `Empty` (EOF, or a `sort:`
+    that extracted itself) wrapped into `Not(Empty)`, whose Display renders
+    a bare `NOT ` that steals the next token on re-parse; negating nothing
+    is now nothing. And nested combinators (`And` under `And`, `Or` under
+    `Or`) rendered flat and re-associated into a different shape; Display
+    now parenthesizes them.
+*   **Degradation polish.** A balanced empty group `()` claims its closer
+    instead of warning "unclosed" about a paren that closed; `bogus:>=5`
+    degrades to one visible fragment instead of three text nodes; and the
+    degradation log is bounded (100 entries, 3 copies per message) with a
+    tail "and N more suppressed" summary in both lists.
+*   **The regex dependency is removed (decided 2026-09-15).** Zero use
+    sites over the crate's entire life: parser+AST-only by charter, with
+    `MatchKind::Regex` a String consumers interpret. The lock shrinks five
+    packages; the docs stop advertising a dependency the code never had.
+*   **Generated-input round-trip fuzz.** 5000 seeded LCG cases over grammar
+    pieces, each shape-stable through two render/re-parse generations, plus
+    an exhaustive per-field value sweep: the hand-written corpus could not
+    see the month-keyword bug or the quoted-bool flip because neither input
+    was in the list.
+*   **Onboarding and API hygiene.** `examples/mini_consumer.rs` is the
+    compile-checked minimal consumer (three traits, parse, a Visitor),
+    built by CI as a trait-bound canary; `ParseResult` and `QueryCache`
+    derive `Debug`.
+*   **Comment/doc truth batch.** The `PerspectiveResolver` doc no longer
+    claims plain parse uses the `()` resolver; the module header names the
+    reported-twice boundaries; sub-diagnostic spans are documented as
+    indexing the perspective's stored text (spec 2.3, `Diagnostic`,
+    `parse_with_resolver`); the negation-cap rustdoc states the parity
+    rounding (at most 65 kept); the fold.rs FTS5 claim is softened to the
+    verified truth (fold strips all of U+0300-036F, FTS5's table is
+    narrower for Cyrillic breve, neither side touches Hebrew niqqud or
+    Arabic harakat); the cross-repo cites are self-contained; the README
+    grammar table gains the juxtaposition row, `kb`, `sort:+key`, and
+    fully prefixed date-keyword examples; spec 2.1 writes named-field
+    variants; the README/spec/roadmap prose passes cut the superlatives
+    and recast the em-dashes.
+
+Suite: 72 green (20 unit + 39 parse + 3 rank + 8 cache + 2 fuzz), clippy
+`-D warnings` clean, `cargo fmt --check` clean.
+
 ## v1.4.2 (2026-09-13)
 
 **Robustness release.** Three never-fail holes close and the docs catch up
