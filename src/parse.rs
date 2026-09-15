@@ -351,6 +351,15 @@ impl<'a, F: ParseField, S: ParseState, K: ParseSort, R: PerspectiveResolver<F, S
                 }
                 self.depth += 1;
                 self.paren_depth += 1;
+                // A balanced empty group reads as nothing and claims its own
+                // closer: letting the inner parse consume it would warn
+                // "unclosed" about a parenthesis that had closed.
+                if self.peek() == Some(&Token::RParen) {
+                    self.pos += 1;
+                    self.depth -= 1;
+                    self.paren_depth -= 1;
+                    return Expr::Empty;
+                }
                 let inner = self.boolean_expr();
                 self.depth -= 1;
                 self.paren_depth -= 1;

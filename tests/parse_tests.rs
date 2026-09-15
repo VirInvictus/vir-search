@@ -606,6 +606,28 @@ fn stray_close_paren_warns_and_keeps_the_rest() {
 }
 
 #[test]
+fn balanced_empty_group_closes_silently() {
+    // A balanced empty group used to eat its closer via the inner parse and
+    // then warn "unclosed parenthesis" about a paren that had closed.
+    let p = parse::<TestField, TestState, TestSort>("author:x () title:y");
+    assert_eq!(
+        p.expr,
+        parse::<TestField, TestState, TestSort>("author:x AND title:y").expr
+    );
+    assert!(
+        p.warnings.is_empty(),
+        "a closed empty group must not warn, got {:?}",
+        p.warnings
+    );
+    let p = parse::<TestField, TestState, TestSort>("( )");
+    assert_eq!(p.expr, Expr::Empty);
+    assert!(p.warnings.is_empty());
+    // A genuinely unclosed group still warns.
+    let p = parse::<TestField, TestState, TestSort>("( genre:ambient");
+    assert!(p.warnings.iter().any(|w| w.contains("unclosed")));
+}
+
+#[test]
 fn clean_parse_has_no_diagnostics() {
     let p = parse::<TestField, TestState, TestSort>("genre:ambient AND rating:>=4 sort:-added");
     assert!(p.diagnostics.is_empty());
