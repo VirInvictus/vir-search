@@ -1,5 +1,7 @@
 # vir-search
 
+> **Status: complete and stable.** Bug reports welcome; feature development is closed.
+
 [![CI](https://github.com/VirInvictus/vir-search/actions/workflows/ci.yml/badge.svg)](https://github.com/VirInvictus/vir-search/actions/workflows/ci.yml)
 
 A domain-agnostic Rust library for parsing Calibre-style search expressions into a typed Abstract Syntax Tree (AST).
