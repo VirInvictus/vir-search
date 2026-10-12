@@ -1,1 +1,27 @@
-CLAUDE.md
+# vir-search
+
+**Stack:** Rust (edition 2024, rust-version 1.85); deps `chrono`, `unicode-normalization` (`regex` removed 2026-09-15: it never had a use site; `MatchKind::Regex` is a String the consumers interpret).
+**Status:** Maintained. Standalone library.
+**Versioning deviation:** there is no `VERSION` file; `Cargo.toml` is the single version source (a `VERSION` file would be a second carrier Cargo cannot consume). Every bump still gets a patchnotes entry and an annotated tag at the release commit.
+
+## What is this?
+A domain-agnostic Rust library for parsing Calibre-style search expressions into a typed AST. Extracted from the `vir-gtk` ecosystem (Atrium, Conservatory) to eliminate parser duplication and provide a unified query language across the desktop suite.
+
+## Key Rules
+- **No Domain Logic**: Do not add SQL generation (`sql_translate.rs`) or local object evaluation (`eval.rs`) to this crate. Consumers must translate the generic `Expr<F, S>` into their own domain logic themselves. This crate must remain exclusively a parser and AST definition.
+- **`FieldType` Introspection**: Because the parser does not know what `F` is at compile time, consumers implement `ParseField::field_type()`. The parser relies on this to branch its parsing logic (e.g., treating `Duration` as `FieldType::Real` to allow float parsing, or `Added` as `FieldType::Date` to engage the date grammar; that grammar is hand-rolled `parse_date_spec`, and `chrono` enters only at consumer-invoked `dates::resolve_range`).
+- **Forgiving Parsing**: The lexer and parser must never fail or panic, and since 1.0.4 the parse path has no error channel at all: every failure degrades locally (a trailing operator or missing value keeps the parsed side; an unclosed parenthesis keeps its content; a quoted value is literal text, never a boolean presence check and never a list body, decided 2026-09-15; a relational comparator on a text field degrades to its visible text form). Malformed input must always degrade into text-match (`Expr::Text`) or `Expr::Empty`, never a crash or a whole-query collapse.
+- **Round-Trip Integrity**: The `Display` implementation for `Expr<F, S>` must exactly recreate a parseable string that produces an identical AST. This ensures that user perspectives can be serialized to disk and loaded without semantic drift. The hand-written corpus asserts shape-stability only, the generated-input fuzz (`tests/fuzz_round_trip.rs`, since 1.4.3) sweeps shape-stability over combinations, and new grammar still needs its own semantic assertions (the month-keyword gap slipped through exactly this way).
+- **Cache Skip on Real Literals**: `Value::Real` is deliberately excluded from hashing (decided 2026-09-11; no f64 hashing pitfalls). `Expr` implements `Eq`/`Hash`, but any cache keyed on it must skip queries where `Expr::contains_real()` is true; the crate's own `QueryCache` does exactly that.
+
+## Development Commands
+```bash
+cargo check
+cargo test
+cargo fmt
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+## Release flow
+
+Commit and push verified work (the standing push grant in the global file; force-pushes still need approval), wait for CI to go green, then tag: annotated `vX.Y.Z` at the release commit, message = that release's patchnotes entry verbatim (`--cleanup=verbatim`; the full tag procedure lives in `~/.zcode/AGENTS.md`). Version carrier: `Cargo.toml` only, per the deviation above.
